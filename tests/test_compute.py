@@ -89,3 +89,31 @@ def test_window_boundaries_are_half_open():
     assert stats.daytime_low == 60
     assert stats.night_high == 70
     assert stats.night_low == 70
+
+
+def test_sun_window_overrides_fixed_hours():
+    sunrise = _at(7)
+    sunset = _at(19)
+    forecast = [
+        _fc(_at(6), 50),  # before sunrise → night
+        _fc(_at(7), 55),  # at sunrise → daytime
+        _fc(_at(12), 75),  # daytime
+        _fc(_at(19), 65),  # at sunset → night (end exclusive)
+        _fc(_at(22), 58),  # night
+    ]
+    # fixed hours (0, 24) would otherwise mark everything as daytime;
+    # the sunrise/sunset pair must override it.
+    stats = _compute(forecast, 0, 24, None, _NOW, sunrise=sunrise, sunset=sunset)
+    assert stats.daytime_high == 75
+    assert stats.daytime_low == 55
+    assert stats.night_high == 65
+    assert stats.night_low == 50
+
+
+def test_sun_window_ignored_when_either_bound_missing():
+    sunrise = _at(7)
+    forecast = [_fc(_at(8), 70), _fc(_at(22), 55)]
+    stats = _compute(forecast, 6, 20, None, _NOW, sunrise=sunrise, sunset=None)
+    # falls back to fixed hours 6..20
+    assert stats.daytime_high == 70
+    assert stats.night_high == 55

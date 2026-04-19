@@ -11,14 +11,18 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.weather_plus.const import (
     CONF_DAYTIME_END,
+    CONF_DAYTIME_MODE,
     CONF_DAYTIME_START,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
     DOMAIN,
+    MODE_FIXED,
+    MODE_SUN,
 )
 
 _VALID = {
     CONF_WEATHER_ENTITY: "weather.home",
+    CONF_DAYTIME_MODE: MODE_FIXED,
     CONF_DAYTIME_START: 6,
     CONF_DAYTIME_END: 20,
     CONF_UPDATE_INTERVAL: 30,
@@ -39,6 +43,7 @@ async def test_user_flow_creates_entry(hass: HomeAssistant) -> None:
     assert result2["type"] == FlowResultType.CREATE_ENTRY
     assert result2["data"] == {CONF_WEATHER_ENTITY: "weather.home"}
     assert result2["options"] == {
+        CONF_DAYTIME_MODE: MODE_FIXED,
         CONF_DAYTIME_START: 6,
         CONF_DAYTIME_END: 20,
         CONF_UPDATE_INTERVAL: 30,
@@ -78,6 +83,7 @@ async def test_options_flow_rejects_invalid_window(hass: HomeAssistant) -> None:
         unique_id="weather.home",
         data={CONF_WEATHER_ENTITY: "weather.home"},
         options={
+            CONF_DAYTIME_MODE: MODE_FIXED,
             CONF_DAYTIME_START: 6,
             CONF_DAYTIME_END: 20,
             CONF_UPDATE_INTERVAL: 30,
@@ -91,7 +97,32 @@ async def test_options_flow_rejects_invalid_window(hass: HomeAssistant) -> None:
 
     result2 = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {CONF_DAYTIME_START: 20, CONF_DAYTIME_END: 6, CONF_UPDATE_INTERVAL: 30},
+        {
+            CONF_DAYTIME_MODE: MODE_FIXED,
+            CONF_DAYTIME_START: 20,
+            CONF_DAYTIME_END: 6,
+            CONF_UPDATE_INTERVAL: 30,
+        },
     )
     assert result2["type"] == FlowResultType.FORM
     assert result2["errors"] == {"base": "invalid_window"}
+
+
+async def test_sun_mode_ignores_hour_order(hass: HomeAssistant) -> None:
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    with patch("custom_components.weather_plus.async_setup_entry", return_value=True):
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_WEATHER_ENTITY: "weather.home",
+                CONF_DAYTIME_MODE: MODE_SUN,
+                CONF_DAYTIME_START: 20,
+                CONF_DAYTIME_END: 6,
+                CONF_UPDATE_INTERVAL: 30,
+            },
+        )
+        await hass.async_block_till_done()
+    assert result2["type"] == FlowResultType.CREATE_ENTRY
+    assert result2["options"][CONF_DAYTIME_MODE] == MODE_SUN

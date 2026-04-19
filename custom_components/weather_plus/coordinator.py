@@ -8,19 +8,24 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import SUN_EVENT_SUNRISE, SUN_EVENT_SUNSET
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.sun import get_astral_event_date
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_DAYTIME_END,
+    CONF_DAYTIME_MODE,
     CONF_DAYTIME_START,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
     DEFAULT_DAYTIME_END,
+    DEFAULT_DAYTIME_MODE,
     DEFAULT_DAYTIME_START,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
+    MODE_SUN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -41,6 +46,7 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         data = {**entry.data, **entry.options}
         self.weather_entity: str = data[CONF_WEATHER_ENTITY]
+        self.daytime_mode: str = data.get(CONF_DAYTIME_MODE, DEFAULT_DAYTIME_MODE)
         self.daytime_start: int = data.get(CONF_DAYTIME_START, DEFAULT_DAYTIME_START)
         self.daytime_end: int = data.get(CONF_DAYTIME_END, DEFAULT_DAYTIME_END)
         interval = data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
@@ -74,7 +80,28 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
 
         forecast = entity_data.get("forecast") or []
         unit = self._read_temperature_unit()
-        return _compute(forecast, self.daytime_start, self.daytime_end, unit, dt_util.now())
+        now = dt_util.now()
+        sunrise, sunset = self._sun_window(now)
+        return _compute(
+            forecast,
+            self.daytime_start,
+            self.daytime_end,
+            unit,
+            now,
+            sunrise=sunrise,
+            sunset=sunset,
+        )
+
+    def _sun_window(self, now: datetime) -> tuple[datetime | None, datetime | None]:
+        if self.daytime_mode != MODE_SUN:
+            return None, None
+        today = now.date()
+        sunrise = get_astral_event_date(self.hass, SUN_EVENT_SUNRISE, today)
+        sunset = get_astral_event_date(self.hass, SUN_EVENT_SUNSET, today)
+        if sunrise is None or sunset is None:
+            _LOGGER.debug("sun events unavailable for %s; falling back to fixed hours", today)
+            return None, None
+        return sunrise, sunset
 
     def _read_temperature_unit(self) -> str | None:
         state = self.hass.states.get(self.weather_entity)
@@ -89,9 +116,12 @@ def _compute(
     daytime_end: int,
     unit: str | None,
     now: datetime,
+    sunrise: datetime | None = None,
+    sunset: datetime | None = None,
 ) -> ForecastStats:
     tz = now.tzinfo
     today = now.date()
+    use_sun = sunrise is not None and sunset is not None
     day, daytime, night = [], [], []
 
     for point in forecast:
@@ -106,7 +136,11 @@ def _compute(
         if local.date() != today:
             continue
         day.append(temp)
-        if daytime_start <= local.hour < daytime_end:
+        if use_sun:
+            is_daytime = sunrise <= parsed < sunset
+        else:
+            is_daytime = daytime_start <= local.hour < daytime_end
+        if is_daytime:
             daytime.append(temp)
         else:
             night.append(temp)

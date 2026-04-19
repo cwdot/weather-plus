@@ -11,19 +11,35 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_DAYTIME_END,
+    CONF_DAYTIME_MODE,
     CONF_DAYTIME_START,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
+    DAYTIME_MODES,
     DEFAULT_DAYTIME_END,
+    DEFAULT_DAYTIME_MODE,
     DEFAULT_DAYTIME_START,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
+    MODE_FIXED,
+)
+
+_MODE_SELECTOR = selector.SelectSelector(
+    selector.SelectSelectorConfig(
+        options=list(DAYTIME_MODES),
+        mode=selector.SelectSelectorMode.DROPDOWN,
+        translation_key=CONF_DAYTIME_MODE,
+    )
 )
 
 
 def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
     return vol.Schema(
         {
+            vol.Required(
+                CONF_DAYTIME_MODE,
+                default=defaults.get(CONF_DAYTIME_MODE, DEFAULT_DAYTIME_MODE),
+            ): _MODE_SELECTOR,
             vol.Required(
                 CONF_DAYTIME_START,
                 default=defaults.get(CONF_DAYTIME_START, DEFAULT_DAYTIME_START),
@@ -40,14 +56,24 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
+def _validate(user_input: dict[str, Any]) -> str | None:
+    if (
+        user_input[CONF_DAYTIME_MODE] == MODE_FIXED
+        and user_input[CONF_DAYTIME_END] <= user_input[CONF_DAYTIME_START]
+    ):
+        return "invalid_window"
+    return None
+
+
 class WeatherPlusConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> Any:
         errors: dict[str, str] = {}
         if user_input is not None:
-            if user_input[CONF_DAYTIME_END] <= user_input[CONF_DAYTIME_START]:
-                errors["base"] = "invalid_window"
+            err = _validate(user_input)
+            if err:
+                errors["base"] = err
             else:
                 await self.async_set_unique_id(user_input[CONF_WEATHER_ENTITY])
                 self._abort_if_unique_id_configured()
@@ -55,6 +81,7 @@ class WeatherPlusConfigFlow(ConfigFlow, domain=DOMAIN):
                     title=f"Weather Plus ({user_input[CONF_WEATHER_ENTITY]})",
                     data={CONF_WEATHER_ENTITY: user_input[CONF_WEATHER_ENTITY]},
                     options={
+                        CONF_DAYTIME_MODE: user_input[CONF_DAYTIME_MODE],
                         CONF_DAYTIME_START: user_input[CONF_DAYTIME_START],
                         CONF_DAYTIME_END: user_input[CONF_DAYTIME_END],
                         CONF_UPDATE_INTERVAL: user_input[CONF_UPDATE_INTERVAL],
@@ -84,8 +111,9 @@ class WeatherPlusOptionsFlow(OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> Any:
         errors: dict[str, str] = {}
         if user_input is not None:
-            if user_input[CONF_DAYTIME_END] <= user_input[CONF_DAYTIME_START]:
-                errors["base"] = "invalid_window"
+            err = _validate(user_input)
+            if err:
+                errors["base"] = err
             else:
                 return self.async_create_entry(title="", data=user_input)
 

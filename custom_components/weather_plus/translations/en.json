@@ -6,9 +6,13 @@
         "description": "Wraps a weather entity's hourly forecast and exposes day/daytime/night high/low sensors.",
         "data": {
           "weather_entity": "Source weather entity",
+          "daytime_mode": "Daytime boundary",
           "daytime_start": "Daytime start hour (0-23)",
           "daytime_end": "Daytime end hour (1-24)",
           "update_interval": "Update interval (minutes)"
+        },
+        "data_description": {
+          "daytime_mode": "Fixed hours use the values below; Sunrise / sunset uses Home Assistant's location."
         }
       }
     },
@@ -24,6 +28,7 @@
       "init": {
         "title": "Weather Plus options",
         "data": {
+          "daytime_mode": "Daytime boundary",
           "daytime_start": "Daytime start hour (0-23)",
           "daytime_end": "Daytime end hour (1-24)",
           "update_interval": "Update interval (minutes)"
@@ -32,6 +37,14 @@
     },
     "error": {
       "invalid_window": "Daytime end must be after daytime start."
+    }
+  },
+  "selector": {
+    "daytime_mode": {
+      "options": {
+        "fixed": "Fixed hours",
+        "sun": "Sunrise / sunset"
+      }
     }
   }
 }
