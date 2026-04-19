@@ -1,0 +1,11 @@
+{
+  "domain": "weather_plus",
+  "name": "Weather Plus",
+  "codeowners": ["@cwdot"],
+  "config_flow": true,
+  "documentation": "https://github.com/cwdot/weather-plus",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/cwdot/weather-plus/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

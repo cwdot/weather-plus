@@ -1,0 +1,37 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Weather Plus",
+        "description": "Wraps a weather entity's hourly forecast and exposes day/daytime/night high/low sensors.",
+        "data": {
+          "weather_entity": "Source weather entity",
+          "daytime_start": "Daytime start hour (0-23)",
+          "daytime_end": "Daytime end hour (1-24)",
+          "update_interval": "Update interval (minutes)"
+        }
+      }
+    },
+    "error": {
+      "invalid_window": "Daytime end must be after daytime start."
+    },
+    "abort": {
+      "already_configured": "This weather entity is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Weather Plus options",
+        "data": {
+          "daytime_start": "Daytime start hour (0-23)",
+          "daytime_end": "Daytime end hour (1-24)",
+          "update_interval": "Update interval (minutes)"
+        }
+      }
+    },
+    "error": {
+      "invalid_window": "Daytime end must be after daytime start."
+    }
+  }
+}

@@ -1,0 +1,10 @@
+DOMAIN = "weather_plus"
+
+CONF_WEATHER_ENTITY = "weather_entity"
+CONF_DAYTIME_START = "daytime_start"
+CONF_DAYTIME_END = "daytime_end"
+CONF_UPDATE_INTERVAL = "update_interval"
+
+DEFAULT_DAYTIME_START = 6
+DEFAULT_DAYTIME_END = 20
+DEFAULT_UPDATE_INTERVAL = 30
