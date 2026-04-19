@@ -45,6 +45,10 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         self.daytime_end: int = data.get(CONF_DAYTIME_END, DEFAULT_DAYTIME_END)
         interval = data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
 
+        self.source_object_id = self.weather_entity.split(".", 1)[-1]
+        state = hass.states.get(self.weather_entity)
+        self.source_name = (state.name if state else None) or self.source_object_id
+
         super().__init__(
             hass,
             _LOGGER,
