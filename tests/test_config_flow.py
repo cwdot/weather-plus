@@ -13,6 +13,7 @@ from custom_components.weather_plus.const import (
     CONF_DAYTIME_END,
     CONF_DAYTIME_MODE,
     CONF_DAYTIME_START,
+    CONF_DUAL_UNIT,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
     DOMAIN,
@@ -26,6 +27,7 @@ _VALID = {
     CONF_DAYTIME_START: 6,
     CONF_DAYTIME_END: 20,
     CONF_UPDATE_INTERVAL: 30,
+    CONF_DUAL_UNIT: False,
 }
 
 
@@ -47,6 +49,7 @@ async def test_user_flow_creates_entry(hass: HomeAssistant) -> None:
         CONF_DAYTIME_START: 6,
         CONF_DAYTIME_END: 20,
         CONF_UPDATE_INTERVAL: 30,
+        CONF_DUAL_UNIT: False,
     }
 
 
@@ -87,6 +90,7 @@ async def test_options_flow_rejects_invalid_window(hass: HomeAssistant) -> None:
             CONF_DAYTIME_START: 6,
             CONF_DAYTIME_END: 20,
             CONF_UPDATE_INTERVAL: 30,
+            CONF_DUAL_UNIT: False,
         },
     )
     entry.add_to_hass(hass)
@@ -102,6 +106,7 @@ async def test_options_flow_rejects_invalid_window(hass: HomeAssistant) -> None:
             CONF_DAYTIME_START: 20,
             CONF_DAYTIME_END: 6,
             CONF_UPDATE_INTERVAL: 30,
+            CONF_DUAL_UNIT: False,
         },
     )
     assert result2["type"] == FlowResultType.FORM
@@ -121,6 +126,7 @@ async def test_sun_mode_ignores_hour_order(hass: HomeAssistant) -> None:
                 CONF_DAYTIME_START: 20,
                 CONF_DAYTIME_END: 6,
                 CONF_UPDATE_INTERVAL: 30,
+                CONF_DUAL_UNIT: True,
             },
         )
         await hass.async_block_till_done()

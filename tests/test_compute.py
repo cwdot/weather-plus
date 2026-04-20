@@ -117,3 +117,10 @@ def test_sun_window_ignored_when_either_bound_missing():
     # falls back to fixed hours 6..20
     assert stats.daytime_high == 70
     assert stats.night_high == 55
+
+
+def test_current_temperature_passthrough():
+    stats = _compute([], 6, 20, "°F", _NOW, current_temperature=72.5)
+    assert stats.current_temperature == 72.5
+    stats = _compute([], 6, 20, "°F", _NOW)
+    assert stats.current_temperature is None

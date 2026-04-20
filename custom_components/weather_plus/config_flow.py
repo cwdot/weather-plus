@@ -13,12 +13,14 @@ from .const import (
     CONF_DAYTIME_END,
     CONF_DAYTIME_MODE,
     CONF_DAYTIME_START,
+    CONF_DUAL_UNIT,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
     DAYTIME_MODES,
     DEFAULT_DAYTIME_END,
     DEFAULT_DAYTIME_MODE,
     DEFAULT_DAYTIME_START,
+    DEFAULT_DUAL_UNIT,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     MODE_FIXED,
@@ -52,6 +54,10 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
                 CONF_UPDATE_INTERVAL,
                 default=defaults.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
             ): vol.All(int, vol.Range(min=1, max=1440)),
+            vol.Required(
+                CONF_DUAL_UNIT,
+                default=defaults.get(CONF_DUAL_UNIT, DEFAULT_DUAL_UNIT),
+            ): bool,
         }
     )
 
@@ -85,6 +91,7 @@ class WeatherPlusConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_DAYTIME_START: user_input[CONF_DAYTIME_START],
                         CONF_DAYTIME_END: user_input[CONF_DAYTIME_END],
                         CONF_UPDATE_INTERVAL: user_input[CONF_UPDATE_INTERVAL],
+                        CONF_DUAL_UNIT: user_input[CONF_DUAL_UNIT],
                     },
                 )
 

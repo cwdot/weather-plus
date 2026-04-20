@@ -9,7 +9,8 @@
           "daytime_mode": "Daytime boundary",
           "daytime_start": "Daytime start hour (0-23)",
           "daytime_end": "Daytime end hour (1-24)",
-          "update_interval": "Update interval (minutes)"
+          "update_interval": "Update interval (minutes)",
+          "dual_unit": "Emit both Fahrenheit and Celsius sensors (adds current temperature)"
         },
         "data_description": {
           "daytime_mode": "Fixed hours use the values below; Sunrise / sunset uses Home Assistant's location."
@@ -31,7 +32,8 @@
           "daytime_mode": "Daytime boundary",
           "daytime_start": "Daytime start hour (0-23)",
           "daytime_end": "Daytime end hour (1-24)",
-          "update_interval": "Update interval (minutes)"
+          "update_interval": "Update interval (minutes)",
+          "dual_unit": "Emit both Fahrenheit and Celsius sensors (adds current temperature)"
         }
       }
     },

@@ -40,6 +40,7 @@ class ForecastStats:
     night_high: float | None
     night_low: float | None
     temperature_unit: str | None
+    current_temperature: float | None = None
 
 
 class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
@@ -79,7 +80,7 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
             raise UpdateFailed(f"no forecast for {self.weather_entity}")
 
         forecast = entity_data.get("forecast") or []
-        unit = self._read_temperature_unit()
+        unit, current = self._read_source_state()
         now = dt_util.now()
         sunrise, sunset = self._sun_window(now)
         return _compute(
@@ -90,6 +91,7 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
             now,
             sunrise=sunrise,
             sunset=sunset,
+            current_temperature=current,
         )
 
     def _sun_window(self, now: datetime) -> tuple[datetime | None, datetime | None]:
@@ -103,11 +105,14 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
             return None, None
         return sunrise, sunset
 
-    def _read_temperature_unit(self) -> str | None:
+    def _read_source_state(self) -> tuple[str | None, float | None]:
         state = self.hass.states.get(self.weather_entity)
         if state is None:
-            return None
-        return state.attributes.get("temperature_unit")
+            return None, None
+        unit = state.attributes.get("temperature_unit")
+        raw = state.attributes.get("temperature")
+        current = raw if isinstance(raw, int | float) else None
+        return unit, current
 
 
 def _compute(
@@ -118,6 +123,7 @@ def _compute(
     now: datetime,
     sunrise: datetime | None = None,
     sunset: datetime | None = None,
+    current_temperature: float | None = None,
 ) -> ForecastStats:
     tz = now.tzinfo
     today = now.date()
@@ -153,4 +159,5 @@ def _compute(
         night_high=max(night) if night else None,
         night_low=min(night) if night else None,
         temperature_unit=unit,
+        current_temperature=current_temperature,
     )
