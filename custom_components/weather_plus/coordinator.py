@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -14,6 +14,7 @@ from homeassistant.helpers.sun import get_astral_event_date
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
+from .conditions import ForecastPoint
 from .const import (
     CONF_DAYTIME_END,
     CONF_DAYTIME_MODE,
@@ -41,6 +42,18 @@ class ForecastStats:
     night_low: float | None
     temperature_unit: str | None
     current_temperature: float | None = None
+    forecast_points: list[ForecastPoint] = field(default_factory=list)
+
+
+@dataclass
+class _DailyExtremes:
+    day_date: date
+    day_high: float | None = None
+    day_low: float | None = None
+    daytime_high: float | None = None
+    daytime_low: float | None = None
+    night_high: float | None = None
+    night_low: float | None = None
 
 
 class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
@@ -55,6 +68,8 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         self.source_object_id = self.weather_entity.split(".", 1)[-1]
         state = hass.states.get(self.weather_entity)
         self.source_name = (state.name if state else None) or self.source_object_id
+
+        self._extremes: _DailyExtremes | None = None
 
         super().__init__(
             hass,
@@ -83,7 +98,7 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         unit, current = self._read_source_state()
         now = dt_util.now()
         sunrise, sunset = self._sun_window(now)
-        return _compute(
+        fresh = _compute(
             forecast,
             self.daytime_start,
             self.daytime_end,
@@ -92,6 +107,48 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
             sunrise=sunrise,
             sunset=sunset,
             current_temperature=current,
+        )
+        return self._merge_extremes(fresh, now, sunrise, sunset, current)
+
+    def _merge_extremes(
+        self,
+        fresh: ForecastStats,
+        now: datetime,
+        sunrise: datetime | None,
+        sunset: datetime | None,
+        current: float | None,
+    ) -> ForecastStats:
+        today = now.date()
+        if self._extremes is None or self._extremes.day_date != today:
+            self._extremes = _DailyExtremes(day_date=today)
+        cache = self._extremes
+
+        cache.day_high = _max(cache.day_high, fresh.day_high)
+        cache.day_low = _min(cache.day_low, fresh.day_low)
+        cache.daytime_high = _max(cache.daytime_high, fresh.daytime_high)
+        cache.daytime_low = _min(cache.daytime_low, fresh.daytime_low)
+        cache.night_high = _max(cache.night_high, fresh.night_high)
+        cache.night_low = _min(cache.night_low, fresh.night_low)
+
+        # Fold the current observed temperature into the appropriate bucket.
+        if current is not None:
+            cache.day_high = _max(cache.day_high, current)
+            cache.day_low = _min(cache.day_low, current)
+            if _is_daytime(now, sunrise, sunset, self.daytime_start, self.daytime_end):
+                cache.daytime_high = _max(cache.daytime_high, current)
+                cache.daytime_low = _min(cache.daytime_low, current)
+            else:
+                cache.night_high = _max(cache.night_high, current)
+                cache.night_low = _min(cache.night_low, current)
+
+        return replace(
+            fresh,
+            day_high=cache.day_high,
+            day_low=cache.day_low,
+            daytime_high=cache.daytime_high,
+            daytime_low=cache.daytime_low,
+            night_high=cache.night_high,
+            night_low=cache.night_low,
         )
 
     def _sun_window(self, now: datetime) -> tuple[datetime | None, datetime | None]:
@@ -115,6 +172,34 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         return unit, current
 
 
+def _max(a: float | None, b: float | None) -> float | None:
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return max(a, b)
+
+
+def _min(a: float | None, b: float | None) -> float | None:
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return min(a, b)
+
+
+def _is_daytime(
+    now: datetime,
+    sunrise: datetime | None,
+    sunset: datetime | None,
+    daytime_start: int,
+    daytime_end: int,
+) -> bool:
+    if sunrise is not None and sunset is not None:
+        return sunrise <= now < sunset
+    return daytime_start <= now.hour < daytime_end
+
+
 def _compute(
     forecast: list[dict[str, Any]],
     daytime_start: int,
@@ -129,14 +214,27 @@ def _compute(
     today = now.date()
     use_sun = sunrise is not None and sunset is not None
     day, daytime, night = [], [], []
+    points: list[ForecastPoint] = []
 
     for point in forecast:
         raw_dt = point.get("datetime")
-        temp = point.get("temperature")
-        if raw_dt is None or temp is None:
+        if raw_dt is None:
             continue
         parsed = dt_util.parse_datetime(raw_dt)
         if parsed is None:
+            continue
+
+        temp = point.get("temperature")
+        condition = point.get("condition")
+        points.append(
+            ForecastPoint(
+                when=parsed,
+                temperature=temp if isinstance(temp, int | float) else None,
+                condition=condition if isinstance(condition, str) else None,
+            )
+        )
+
+        if temp is None:
             continue
         local = parsed.astimezone(tz) if tz is not None else dt_util.as_local(parsed)
         if local.date() != today:
@@ -160,4 +258,5 @@ def _compute(
         night_low=min(night) if night else None,
         temperature_unit=unit,
         current_temperature=current_temperature,
+        forecast_points=points,
     )

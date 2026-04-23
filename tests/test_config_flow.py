@@ -10,12 +10,18 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.weather_plus.const import (
+    CONF_COLD_THRESHOLD,
     CONF_DAYTIME_END,
     CONF_DAYTIME_MODE,
     CONF_DAYTIME_START,
     CONF_DUAL_UNIT,
+    CONF_ENABLE_CONDITIONS,
+    CONF_HOT_THRESHOLD,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
+    DEFAULT_COLD_THRESHOLD,
+    DEFAULT_ENABLE_CONDITIONS,
+    DEFAULT_HOT_THRESHOLD,
     DOMAIN,
     MODE_FIXED,
     MODE_SUN,
@@ -50,6 +56,9 @@ async def test_user_flow_creates_entry(hass: HomeAssistant) -> None:
         CONF_DAYTIME_END: 20,
         CONF_UPDATE_INTERVAL: 30,
         CONF_DUAL_UNIT: False,
+        CONF_ENABLE_CONDITIONS: DEFAULT_ENABLE_CONDITIONS,
+        CONF_COLD_THRESHOLD: DEFAULT_COLD_THRESHOLD,
+        CONF_HOT_THRESHOLD: DEFAULT_HOT_THRESHOLD,
     }
 
 

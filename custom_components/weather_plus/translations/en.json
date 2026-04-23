@@ -10,15 +10,20 @@
           "daytime_start": "Daytime start hour (0-23)",
           "daytime_end": "Daytime end hour (1-24)",
           "update_interval": "Update interval (minutes)",
-          "dual_unit": "Emit both Fahrenheit and Celsius sensors (adds current temperature)"
+          "dual_unit": "Emit both Fahrenheit and Celsius sensors (adds current temperature)",
+          "enable_conditions": "Emit forecast condition binary sensors",
+          "cold_threshold": "Cold threshold (in source unit)",
+          "hot_threshold": "Hot threshold (in source unit)"
         },
         "data_description": {
-          "daytime_mode": "Fixed hours use the values below; Sunrise / sunset uses Home Assistant's location."
+          "daytime_mode": "Fixed hours use the values below; Sunrise / sunset uses Home Assistant's location.",
+          "enable_conditions": "Adds binary sensors like today_rain, today_cold, hour_lightning derived from the hourly forecast."
         }
       }
     },
     "error": {
-      "invalid_window": "Daytime end must be after daytime start."
+      "invalid_window": "Daytime end must be after daytime start.",
+      "invalid_thresholds": "Hot threshold must be greater than cold threshold."
     },
     "abort": {
       "already_configured": "This weather entity is already configured."
@@ -33,12 +38,16 @@
           "daytime_start": "Daytime start hour (0-23)",
           "daytime_end": "Daytime end hour (1-24)",
           "update_interval": "Update interval (minutes)",
-          "dual_unit": "Emit both Fahrenheit and Celsius sensors (adds current temperature)"
+          "dual_unit": "Emit both Fahrenheit and Celsius sensors (adds current temperature)",
+          "enable_conditions": "Emit forecast condition binary sensors",
+          "cold_threshold": "Cold threshold (in source unit)",
+          "hot_threshold": "Hot threshold (in source unit)"
         }
       }
     },
     "error": {
-      "invalid_window": "Daytime end must be after daytime start."
+      "invalid_window": "Daytime end must be after daytime start.",
+      "invalid_thresholds": "Hot threshold must be greater than cold threshold."
     }
   },
   "selector": {
