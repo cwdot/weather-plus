@@ -152,6 +152,10 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
             night_low=cache.night_low,
         )
 
+    def reset_extremes(self) -> None:
+        """Drop the carry-forward high/low cache; next refresh starts fresh."""
+        self._extremes = None
+
     def _sun_window(self, now: datetime) -> tuple[datetime | None, datetime | None]:
         if self.daytime_mode != MODE_SUN:
             return None, None

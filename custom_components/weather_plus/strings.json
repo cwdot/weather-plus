@@ -59,5 +59,11 @@
         "sun": "Sunrise / sunset"
       }
     }
+  },
+  "services": {
+    "reset_extremes": {
+      "name": "Reset extremes",
+      "description": "Clear the carry-forward day/daytime/night high/low cache and trigger a refresh."
+    }
   }
 }

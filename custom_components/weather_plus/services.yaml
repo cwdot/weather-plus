@@ -1,0 +1,5 @@
+reset_extremes:
+  name: Reset extremes
+  description: >-
+    Clear the carry-forward day/daytime/night high/low cache and trigger an
+    immediate forecast refresh. Applies to every Weather Plus entry.

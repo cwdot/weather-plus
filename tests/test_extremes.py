@@ -130,6 +130,15 @@ def test_extremes_dataclass_initial_state():
     assert cache.daytime_low is None
 
 
+def test_reset_extremes_drops_running_values():
+    coord = _make_coordinator()
+    coord._merge_extremes(_stats(day_high=99, day_low=50), _NOW, None, None, current=None)
+    coord.reset_extremes()
+    out = coord._merge_extremes(_stats(day_high=70, day_low=60), _NOW, None, None, current=None)
+    assert out.day_high == 70
+    assert out.day_low == 60
+
+
 def test_forecast_points_and_unit_pass_through():
     coord = _make_coordinator()
     fresh = _stats(day_high=80, day_low=70, current_temperature=75)
