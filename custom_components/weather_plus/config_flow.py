@@ -17,6 +17,7 @@ from .const import (
     CONF_DUAL_UNIT,
     CONF_ENABLE_CONDITIONS,
     CONF_HOT_THRESHOLD,
+    CONF_SUN_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
     DAYTIME_MODES,
@@ -27,6 +28,7 @@ from .const import (
     DEFAULT_DUAL_UNIT,
     DEFAULT_ENABLE_CONDITIONS,
     DEFAULT_HOT_THRESHOLD,
+    DEFAULT_SUN_ENTITY,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     MODE_FIXED,
@@ -48,6 +50,10 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
                 CONF_DAYTIME_MODE,
                 default=defaults.get(CONF_DAYTIME_MODE, DEFAULT_DAYTIME_MODE),
             ): _MODE_SELECTOR,
+            vol.Required(
+                CONF_SUN_ENTITY,
+                default=defaults.get(CONF_SUN_ENTITY, DEFAULT_SUN_ENTITY),
+            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sun")),
             vol.Required(
                 CONF_DAYTIME_START,
                 default=defaults.get(CONF_DAYTIME_START, DEFAULT_DAYTIME_START),
@@ -108,6 +114,7 @@ class WeatherPlusConfigFlow(ConfigFlow, domain=DOMAIN):
                     data={CONF_WEATHER_ENTITY: user_input[CONF_WEATHER_ENTITY]},
                     options={
                         CONF_DAYTIME_MODE: user_input[CONF_DAYTIME_MODE],
+                        CONF_SUN_ENTITY: user_input[CONF_SUN_ENTITY],
                         CONF_DAYTIME_START: user_input[CONF_DAYTIME_START],
                         CONF_DAYTIME_END: user_input[CONF_DAYTIME_END],
                         CONF_UPDATE_INTERVAL: user_input[CONF_UPDATE_INTERVAL],

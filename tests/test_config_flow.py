@@ -17,11 +17,13 @@ from custom_components.weather_plus.const import (
     CONF_DUAL_UNIT,
     CONF_ENABLE_CONDITIONS,
     CONF_HOT_THRESHOLD,
+    CONF_SUN_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
     DEFAULT_COLD_THRESHOLD,
     DEFAULT_ENABLE_CONDITIONS,
     DEFAULT_HOT_THRESHOLD,
+    DEFAULT_SUN_ENTITY,
     DOMAIN,
     MODE_FIXED,
     MODE_SUN,
@@ -30,6 +32,7 @@ from custom_components.weather_plus.const import (
 _VALID = {
     CONF_WEATHER_ENTITY: "weather.home",
     CONF_DAYTIME_MODE: MODE_FIXED,
+    CONF_SUN_ENTITY: DEFAULT_SUN_ENTITY,
     CONF_DAYTIME_START: 6,
     CONF_DAYTIME_END: 20,
     CONF_UPDATE_INTERVAL: 30,
@@ -52,6 +55,7 @@ async def test_user_flow_creates_entry(hass: HomeAssistant) -> None:
     assert result2["data"] == {CONF_WEATHER_ENTITY: "weather.home"}
     assert result2["options"] == {
         CONF_DAYTIME_MODE: MODE_FIXED,
+        CONF_SUN_ENTITY: DEFAULT_SUN_ENTITY,
         CONF_DAYTIME_START: 6,
         CONF_DAYTIME_END: 20,
         CONF_UPDATE_INTERVAL: 30,
@@ -112,6 +116,7 @@ async def test_options_flow_rejects_invalid_window(hass: HomeAssistant) -> None:
         result["flow_id"],
         {
             CONF_DAYTIME_MODE: MODE_FIXED,
+            CONF_SUN_ENTITY: DEFAULT_SUN_ENTITY,
             CONF_DAYTIME_START: 20,
             CONF_DAYTIME_END: 6,
             CONF_UPDATE_INTERVAL: 30,
@@ -132,6 +137,7 @@ async def test_sun_mode_ignores_hour_order(hass: HomeAssistant) -> None:
             {
                 CONF_WEATHER_ENTITY: "weather.home",
                 CONF_DAYTIME_MODE: MODE_SUN,
+                CONF_SUN_ENTITY: "sun.custom",
                 CONF_DAYTIME_START: 20,
                 CONF_DAYTIME_END: 6,
                 CONF_UPDATE_INTERVAL: 30,
@@ -141,3 +147,4 @@ async def test_sun_mode_ignores_hour_order(hass: HomeAssistant) -> None:
         await hass.async_block_till_done()
     assert result2["type"] == FlowResultType.CREATE_ENTRY
     assert result2["options"][CONF_DAYTIME_MODE] == MODE_SUN
+    assert result2["options"][CONF_SUN_ENTITY] == "sun.custom"

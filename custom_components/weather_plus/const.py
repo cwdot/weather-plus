@@ -1,6 +1,7 @@
 DOMAIN = "weather_plus"
 
 CONF_WEATHER_ENTITY = "weather_entity"
+CONF_SUN_ENTITY = "sun_entity"
 CONF_DAYTIME_MODE = "daytime_mode"
 CONF_DAYTIME_START = "daytime_start"
 CONF_DAYTIME_END = "daytime_end"
@@ -14,6 +15,7 @@ MODE_FIXED = "fixed"
 MODE_SUN = "sun"
 DAYTIME_MODES = (MODE_FIXED, MODE_SUN)
 
+DEFAULT_SUN_ENTITY = "sun.sun"
 DEFAULT_DAYTIME_MODE = MODE_FIXED
 DEFAULT_DAYTIME_START = 6
 DEFAULT_DAYTIME_END = 20

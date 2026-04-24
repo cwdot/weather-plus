@@ -8,9 +8,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import SUN_EVENT_SUNRISE, SUN_EVENT_SUNSET
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.sun import get_astral_event_date
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -19,11 +17,13 @@ from .const import (
     CONF_DAYTIME_END,
     CONF_DAYTIME_MODE,
     CONF_DAYTIME_START,
+    CONF_SUN_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
     DEFAULT_DAYTIME_END,
     DEFAULT_DAYTIME_MODE,
     DEFAULT_DAYTIME_START,
+    DEFAULT_SUN_ENTITY,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     MODE_SUN,
@@ -61,6 +61,7 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         data = {**entry.data, **entry.options}
         self.weather_entity: str = data[CONF_WEATHER_ENTITY]
         self.daytime_mode: str = data.get(CONF_DAYTIME_MODE, DEFAULT_DAYTIME_MODE)
+        self.sun_entity: str = data.get(CONF_SUN_ENTITY, DEFAULT_SUN_ENTITY)
         self.daytime_start: int = data.get(CONF_DAYTIME_START, DEFAULT_DAYTIME_START)
         self.daytime_end: int = data.get(CONF_DAYTIME_END, DEFAULT_DAYTIME_END)
         interval = data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
@@ -154,11 +155,17 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
     def _sun_window(self, now: datetime) -> tuple[datetime | None, datetime | None]:
         if self.daytime_mode != MODE_SUN:
             return None, None
-        today = now.date()
-        sunrise = get_astral_event_date(self.hass, SUN_EVENT_SUNRISE, today)
-        sunset = get_astral_event_date(self.hass, SUN_EVENT_SUNSET, today)
+        state = self.hass.states.get(self.sun_entity)
+        if state is None:
+            _LOGGER.debug("sun entity %s unavailable; falling back to fixed hours", self.sun_entity)
+            return None, None
+        sunrise = _today_event(state.attributes.get("next_rising"), now)
+        sunset = _today_event(state.attributes.get("next_setting"), now)
         if sunrise is None or sunset is None:
-            _LOGGER.debug("sun events unavailable for %s; falling back to fixed hours", today)
+            _LOGGER.debug(
+                "sun entity %s missing next_rising/next_setting; falling back to fixed hours",
+                self.sun_entity,
+            )
             return None, None
         return sunrise, sunset
 
@@ -170,6 +177,24 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         raw = state.attributes.get("temperature")
         current = raw if isinstance(raw, int | float) else None
         return unit, current
+
+
+def _today_event(raw: Any, now: datetime) -> datetime | None:
+    """Resolve a sun next_rising/next_setting attribute to today's occurrence.
+
+    The attribute is the *next* event; if its local date is after today, the
+    matching event for today already happened, so step back 24h as an estimate.
+    """
+    if not isinstance(raw, str):
+        return None
+    parsed = dt_util.parse_datetime(raw)
+    if parsed is None:
+        return None
+    tz = now.tzinfo
+    local = parsed.astimezone(tz) if tz is not None else dt_util.as_local(parsed)
+    if local.date() == now.date():
+        return parsed
+    return parsed - timedelta(days=1)
 
 
 def _max(a: float | None, b: float | None) -> float | None:

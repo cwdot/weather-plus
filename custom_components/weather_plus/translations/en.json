@@ -7,6 +7,7 @@
         "data": {
           "weather_entity": "Source weather entity",
           "daytime_mode": "Daytime boundary",
+          "sun_entity": "Sun entity (used when boundary is sunrise / sunset)",
           "daytime_start": "Daytime start hour (0-23)",
           "daytime_end": "Daytime end hour (1-24)",
           "update_interval": "Update interval (minutes)",
@@ -35,6 +36,7 @@
         "title": "Weather Plus options",
         "data": {
           "daytime_mode": "Daytime boundary",
+          "sun_entity": "Sun entity (used when boundary is sunrise / sunset)",
           "daytime_start": "Daytime start hour (0-23)",
           "daytime_end": "Daytime end hour (1-24)",
           "update_interval": "Update interval (minutes)",
