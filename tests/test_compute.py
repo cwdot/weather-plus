@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from custom_components.weather_plus.coordinator import _compute
+from custom_components.weather_plus.coordinator import _compute, _window_bounds
 
 _NOW = datetime(2026, 4, 18, 12, 0, tzinfo=UTC)
 
@@ -26,12 +26,12 @@ def test_partitions_by_window():
         _fc(_at(23), 55),
     ]
     stats = _compute(forecast, 6, 20, "°F", _NOW)
-    assert stats.day_high == 75
-    assert stats.day_low == 50
+    assert stats.todays_high == 75
+    assert stats.todays_low == 50
     assert stats.daytime_high == 75
     assert stats.daytime_low == 60
-    assert stats.night_high == 65
-    assert stats.night_low == 50
+    assert stats.nighttime_high == 65
+    assert stats.nighttime_low == 50
     assert stats.temperature_unit == "°F"
 
 
@@ -42,8 +42,8 @@ def test_excludes_other_days():
         _fc(_at(10, day_offset=-1), 1),
     ]
     stats = _compute(forecast, 6, 20, None, _NOW)
-    assert stats.day_high == 70
-    assert stats.day_low == 70
+    assert stats.todays_high == 70
+    assert stats.todays_low == 70
 
 
 def test_skips_invalid_points():
@@ -55,28 +55,28 @@ def test_skips_invalid_points():
         {"temperature": 100},
     ]
     stats = _compute(forecast, 6, 20, None, _NOW)
-    assert stats.day_high == 70
-    assert stats.day_low == 70
+    assert stats.todays_high == 70
+    assert stats.todays_low == 70
 
 
 def test_empty_buckets_yield_none():
     forecast = [_fc(_at(2), 50)]
     stats = _compute(forecast, 6, 20, None, _NOW)
-    assert stats.day_high == 50
+    assert stats.todays_high == 50
     assert stats.daytime_high is None
     assert stats.daytime_low is None
-    assert stats.night_high == 50
-    assert stats.night_low == 50
+    assert stats.nighttime_high == 50
+    assert stats.nighttime_low == 50
 
 
 def test_empty_forecast():
     stats = _compute([], 6, 20, None, _NOW)
-    assert stats.day_high is None
-    assert stats.day_low is None
+    assert stats.todays_high is None
+    assert stats.todays_low is None
     assert stats.daytime_high is None
     assert stats.daytime_low is None
-    assert stats.night_high is None
-    assert stats.night_low is None
+    assert stats.nighttime_high is None
+    assert stats.nighttime_low is None
 
 
 def test_window_boundaries_are_half_open():
@@ -87,8 +87,8 @@ def test_window_boundaries_are_half_open():
     stats = _compute(forecast, 6, 20, None, _NOW)
     assert stats.daytime_high == 60
     assert stats.daytime_low == 60
-    assert stats.night_high == 70
-    assert stats.night_low == 70
+    assert stats.nighttime_high == 70
+    assert stats.nighttime_low == 70
 
 
 def test_sun_window_overrides_fixed_hours():
@@ -106,8 +106,8 @@ def test_sun_window_overrides_fixed_hours():
     stats = _compute(forecast, 0, 24, None, _NOW, sunrise=sunrise, sunset=sunset)
     assert stats.daytime_high == 75
     assert stats.daytime_low == 55
-    assert stats.night_high == 65
-    assert stats.night_low == 50
+    assert stats.nighttime_high == 65
+    assert stats.nighttime_low == 50
 
 
 def test_sun_window_ignored_when_either_bound_missing():
@@ -116,7 +116,7 @@ def test_sun_window_ignored_when_either_bound_missing():
     stats = _compute(forecast, 6, 20, None, _NOW, sunrise=sunrise, sunset=None)
     # falls back to fixed hours 6..20
     assert stats.daytime_high == 70
-    assert stats.night_high == 55
+    assert stats.nighttime_high == 55
 
 
 def test_current_temperature_passthrough():
@@ -124,3 +124,23 @@ def test_current_temperature_passthrough():
     assert stats.current_temperature == 72.5
     stats = _compute([], 6, 20, "°F", _NOW)
     assert stats.current_temperature is None
+
+
+def test_window_bounds_uses_sun_when_provided():
+    sunrise = _at(7)
+    sunset = _at(19)
+    daytime_at, nighttime_at = _window_bounds(_NOW, sunrise, sunset, 6, 20)
+    assert daytime_at == sunrise
+    assert nighttime_at == sunset
+
+
+def test_window_bounds_falls_back_to_fixed_hours():
+    daytime_at, nighttime_at = _window_bounds(_NOW, None, None, 6, 20)
+    assert daytime_at == _at(6)
+    assert nighttime_at == _at(20)
+
+
+def test_window_bounds_handles_24_as_end_of_day():
+    daytime_at, nighttime_at = _window_bounds(_NOW, None, None, 0, 24)
+    assert daytime_at == _at(0)
+    assert nighttime_at == _at(0) + timedelta(days=1)

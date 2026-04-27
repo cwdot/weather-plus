@@ -3,9 +3,10 @@
 Home Assistant custom integration that wraps a source `weather` entity's hourly forecast and exposes
 six aggregate sensors for the current calendar day:
 
-- `sensor.<name>_day_high` / `_day_low` — across the full day
+- `sensor.<name>_todays_high` / `_todays_low` — across the full day
 - `sensor.<name>_daytime_high` / `_daytime_low` — within configured daytime hours
-- `sensor.<name>_night_high` / `_night_low` — outside daytime hours
+- `sensor.<name>_nighttime_high` / `_nighttime_low` — outside daytime hours
+- `sensor.<name>_daytime` / `_nighttime` — timestamps marking when those windows start today
 
 ## Install via HACS
 

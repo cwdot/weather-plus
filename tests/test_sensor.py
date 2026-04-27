@@ -14,12 +14,12 @@ def _build(target_unit: str | None, source_unit: str, value: float | None = 100.
     """Construct a sensor without invoking CoordinatorEntity.__init__."""
     coordinator = SimpleNamespace(
         data=ForecastStats(
-            day_high=value,
-            day_low=None,
+            todays_high=value,
+            todays_low=None,
             daytime_high=None,
             daytime_low=None,
-            night_high=None,
-            night_low=None,
+            nighttime_high=None,
+            nighttime_low=None,
             temperature_unit=source_unit,
         ),
         source_object_id="home",
@@ -28,7 +28,7 @@ def _build(target_unit: str | None, source_unit: str, value: float | None = 100.
     sensor = _ForecastSensor.__new__(_ForecastSensor)
     sensor.coordinator = coordinator
     sensor._target_unit = target_unit
-    sensor.entity_description = _FORECAST_SPECS[0]  # day_high
+    sensor.entity_description = _FORECAST_SPECS[0]  # todays_high
     return sensor
 
 
