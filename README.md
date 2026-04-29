@@ -1,12 +1,13 @@
 # Weather Plus
 
 Home Assistant custom integration that wraps a source `weather` entity's hourly forecast and exposes
-six aggregate sensors for the current calendar day:
+aggregate sensors for the current cycle (morningtime → next morningtime):
 
-- `sensor.<name>_todays_high` / `_todays_low` — across the full day
-- `sensor.<name>_daytime_high` / `_daytime_low` — within configured daytime hours
-- `sensor.<name>_nighttime_high` / `_nighttime_low` — outside daytime hours
-- `sensor.<name>_daytime` / `_nighttime` — timestamps marking when those windows start today
+- `sensor.<name>_todays_high` / `_todays_low` — across the full cycle
+- `sensor.<name>_morningtime_high` / `_morningtime_low` — morningtime → daytime
+- `sensor.<name>_daytime_high` / `_daytime_low` — daytime → nighttime
+- `sensor.<name>_nighttime_high` / `_nighttime_low` — nighttime → next morningtime
+- `sensor.<name>_morningtime` / `_daytime` / `_nighttime` — timestamps anchoring each window
 
 ## Install via HACS
 
@@ -20,12 +21,16 @@ six aggregate sensors for the current calendar day:
 | Field | Default | Notes |
 |-------|---------|-------|
 | Source weather entity | — | Any `weather.*` entity that supports the `get_forecasts` service |
-| Daytime start hour | `6` | Local-time hour, inclusive |
-| Daytime end hour | `20` | Local-time hour, exclusive |
+| Time anchors | Fixed hours | `Fixed hours` uses the values below; `Dawn / noon / dusk` reads `next_dawn` / `next_noon` / `next_dusk` from the sun entity |
+| Morningtime hour | `6` | Local-time hour; must be `< daytime hour` |
+| Daytime hour | `12` | Local-time hour; must be `< nighttime hour` |
+| Nighttime hour | `20` | Local-time hour |
 | Update interval (min) | `30` | How often to re-fetch the forecast |
 
 ## How it works
 
 On each refresh, the coordinator calls `weather.get_forecasts` (`type: hourly`) on the source
-entity, filters the returned points to today's calendar date in the local timezone, and computes
-min/max temperatures for each window. Sensors inherit the source entity's `temperature_unit`.
+entity, classifies each forecast point into the morningtime / daytime / nighttime window of the
+current cycle, and computes min/max temperatures for each. The cycle starts at the most
+recent passed morningtime — so the nighttime window naturally spans midnight into the next
+calendar day. Sensors inherit the source entity's `temperature_unit`.

@@ -11,23 +11,25 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_COLD_THRESHOLD,
-    CONF_DAYTIME_END,
+    CONF_DAYTIME_HOUR,
     CONF_DAYTIME_MODE,
-    CONF_DAYTIME_START,
     CONF_DUAL_UNIT,
     CONF_ENABLE_CONDITIONS,
     CONF_HOT_THRESHOLD,
+    CONF_MORNINGTIME_HOUR,
+    CONF_NIGHTTIME_HOUR,
     CONF_SUN_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
     DAYTIME_MODES,
     DEFAULT_COLD_THRESHOLD,
-    DEFAULT_DAYTIME_END,
+    DEFAULT_DAYTIME_HOUR,
     DEFAULT_DAYTIME_MODE,
-    DEFAULT_DAYTIME_START,
     DEFAULT_DUAL_UNIT,
     DEFAULT_ENABLE_CONDITIONS,
     DEFAULT_HOT_THRESHOLD,
+    DEFAULT_MORNINGTIME_HOUR,
+    DEFAULT_NIGHTTIME_HOUR,
     DEFAULT_SUN_ENTITY,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
@@ -55,13 +57,17 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
                 default=defaults.get(CONF_SUN_ENTITY, DEFAULT_SUN_ENTITY),
             ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sun")),
             vol.Required(
-                CONF_DAYTIME_START,
-                default=defaults.get(CONF_DAYTIME_START, DEFAULT_DAYTIME_START),
+                CONF_MORNINGTIME_HOUR,
+                default=defaults.get(CONF_MORNINGTIME_HOUR, DEFAULT_MORNINGTIME_HOUR),
             ): vol.All(int, vol.Range(min=0, max=23)),
             vol.Required(
-                CONF_DAYTIME_END,
-                default=defaults.get(CONF_DAYTIME_END, DEFAULT_DAYTIME_END),
-            ): vol.All(int, vol.Range(min=1, max=24)),
+                CONF_DAYTIME_HOUR,
+                default=defaults.get(CONF_DAYTIME_HOUR, DEFAULT_DAYTIME_HOUR),
+            ): vol.All(int, vol.Range(min=0, max=23)),
+            vol.Required(
+                CONF_NIGHTTIME_HOUR,
+                default=defaults.get(CONF_NIGHTTIME_HOUR, DEFAULT_NIGHTTIME_HOUR),
+            ): vol.All(int, vol.Range(min=0, max=23)),
             vol.Required(
                 CONF_UPDATE_INTERVAL,
                 default=defaults.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
@@ -87,11 +93,12 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
 
 
 def _validate(user_input: dict[str, Any]) -> str | None:
-    if (
-        user_input[CONF_DAYTIME_MODE] == MODE_FIXED
-        and user_input[CONF_DAYTIME_END] <= user_input[CONF_DAYTIME_START]
-    ):
-        return "invalid_window"
+    if user_input[CONF_DAYTIME_MODE] == MODE_FIXED:
+        m = user_input[CONF_MORNINGTIME_HOUR]
+        d = user_input[CONF_DAYTIME_HOUR]
+        n = user_input[CONF_NIGHTTIME_HOUR]
+        if not (m < d < n):
+            return "invalid_window"
     if user_input[CONF_HOT_THRESHOLD] <= user_input[CONF_COLD_THRESHOLD]:
         return "invalid_thresholds"
     return None
@@ -115,8 +122,9 @@ class WeatherPlusConfigFlow(ConfigFlow, domain=DOMAIN):
                     options={
                         CONF_DAYTIME_MODE: user_input[CONF_DAYTIME_MODE],
                         CONF_SUN_ENTITY: user_input[CONF_SUN_ENTITY],
-                        CONF_DAYTIME_START: user_input[CONF_DAYTIME_START],
-                        CONF_DAYTIME_END: user_input[CONF_DAYTIME_END],
+                        CONF_MORNINGTIME_HOUR: user_input[CONF_MORNINGTIME_HOUR],
+                        CONF_DAYTIME_HOUR: user_input[CONF_DAYTIME_HOUR],
+                        CONF_NIGHTTIME_HOUR: user_input[CONF_NIGHTTIME_HOUR],
                         CONF_UPDATE_INTERVAL: user_input[CONF_UPDATE_INTERVAL],
                         CONF_DUAL_UNIT: user_input[CONF_DUAL_UNIT],
                         CONF_ENABLE_CONDITIONS: user_input[CONF_ENABLE_CONDITIONS],

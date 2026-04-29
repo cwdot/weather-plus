@@ -11,12 +11,13 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.weather_plus.const import (
     CONF_COLD_THRESHOLD,
-    CONF_DAYTIME_END,
+    CONF_DAYTIME_HOUR,
     CONF_DAYTIME_MODE,
-    CONF_DAYTIME_START,
     CONF_DUAL_UNIT,
     CONF_ENABLE_CONDITIONS,
     CONF_HOT_THRESHOLD,
+    CONF_MORNINGTIME_HOUR,
+    CONF_NIGHTTIME_HOUR,
     CONF_SUN_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
@@ -33,8 +34,9 @@ _VALID = {
     CONF_WEATHER_ENTITY: "weather.home",
     CONF_DAYTIME_MODE: MODE_FIXED,
     CONF_SUN_ENTITY: DEFAULT_SUN_ENTITY,
-    CONF_DAYTIME_START: 6,
-    CONF_DAYTIME_END: 20,
+    CONF_MORNINGTIME_HOUR: 6,
+    CONF_DAYTIME_HOUR: 12,
+    CONF_NIGHTTIME_HOUR: 20,
     CONF_UPDATE_INTERVAL: 30,
     CONF_DUAL_UNIT: False,
 }
@@ -56,8 +58,9 @@ async def test_user_flow_creates_entry(hass: HomeAssistant) -> None:
     assert result2["options"] == {
         CONF_DAYTIME_MODE: MODE_FIXED,
         CONF_SUN_ENTITY: DEFAULT_SUN_ENTITY,
-        CONF_DAYTIME_START: 6,
-        CONF_DAYTIME_END: 20,
+        CONF_MORNINGTIME_HOUR: 6,
+        CONF_DAYTIME_HOUR: 12,
+        CONF_NIGHTTIME_HOUR: 20,
         CONF_UPDATE_INTERVAL: 30,
         CONF_DUAL_UNIT: False,
         CONF_ENABLE_CONDITIONS: DEFAULT_ENABLE_CONDITIONS,
@@ -66,13 +69,25 @@ async def test_user_flow_creates_entry(hass: HomeAssistant) -> None:
     }
 
 
-async def test_user_flow_rejects_invalid_window(hass: HomeAssistant) -> None:
+async def test_user_flow_rejects_unordered_hours(hass: HomeAssistant) -> None:
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
     result2 = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {**_VALID, CONF_DAYTIME_START: 20, CONF_DAYTIME_END: 6},
+        {**_VALID, CONF_MORNINGTIME_HOUR: 20, CONF_DAYTIME_HOUR: 12, CONF_NIGHTTIME_HOUR: 6},
+    )
+    assert result2["type"] == FlowResultType.FORM
+    assert result2["errors"] == {"base": "invalid_window"}
+
+
+async def test_user_flow_rejects_equal_hours(hass: HomeAssistant) -> None:
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {**_VALID, CONF_MORNINGTIME_HOUR: 12, CONF_DAYTIME_HOUR: 12, CONF_NIGHTTIME_HOUR: 20},
     )
     assert result2["type"] == FlowResultType.FORM
     assert result2["errors"] == {"base": "invalid_window"}
@@ -93,15 +108,16 @@ async def test_duplicate_entity_aborts(hass: HomeAssistant) -> None:
     assert result2["reason"] == "already_configured"
 
 
-async def test_options_flow_rejects_invalid_window(hass: HomeAssistant) -> None:
+async def test_options_flow_rejects_unordered_hours(hass: HomeAssistant) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="weather.home",
         data={CONF_WEATHER_ENTITY: "weather.home"},
         options={
             CONF_DAYTIME_MODE: MODE_FIXED,
-            CONF_DAYTIME_START: 6,
-            CONF_DAYTIME_END: 20,
+            CONF_MORNINGTIME_HOUR: 6,
+            CONF_DAYTIME_HOUR: 12,
+            CONF_NIGHTTIME_HOUR: 20,
             CONF_UPDATE_INTERVAL: 30,
             CONF_DUAL_UNIT: False,
         },
@@ -117,10 +133,14 @@ async def test_options_flow_rejects_invalid_window(hass: HomeAssistant) -> None:
         {
             CONF_DAYTIME_MODE: MODE_FIXED,
             CONF_SUN_ENTITY: DEFAULT_SUN_ENTITY,
-            CONF_DAYTIME_START: 20,
-            CONF_DAYTIME_END: 6,
+            CONF_MORNINGTIME_HOUR: 20,
+            CONF_DAYTIME_HOUR: 12,
+            CONF_NIGHTTIME_HOUR: 6,
             CONF_UPDATE_INTERVAL: 30,
             CONF_DUAL_UNIT: False,
+            CONF_ENABLE_CONDITIONS: False,
+            CONF_COLD_THRESHOLD: DEFAULT_COLD_THRESHOLD,
+            CONF_HOT_THRESHOLD: DEFAULT_HOT_THRESHOLD,
         },
     )
     assert result2["type"] == FlowResultType.FORM
@@ -138,8 +158,9 @@ async def test_sun_mode_ignores_hour_order(hass: HomeAssistant) -> None:
                 CONF_WEATHER_ENTITY: "weather.home",
                 CONF_DAYTIME_MODE: MODE_SUN,
                 CONF_SUN_ENTITY: "sun.custom",
-                CONF_DAYTIME_START: 20,
-                CONF_DAYTIME_END: 6,
+                CONF_MORNINGTIME_HOUR: 20,
+                CONF_DAYTIME_HOUR: 12,
+                CONF_NIGHTTIME_HOUR: 6,
                 CONF_UPDATE_INTERVAL: 30,
                 CONF_DUAL_UNIT: True,
             },

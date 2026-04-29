@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -14,15 +14,17 @@ from homeassistant.util import dt as dt_util
 
 from .conditions import ForecastPoint
 from .const import (
-    CONF_DAYTIME_END,
+    CONF_DAYTIME_HOUR,
     CONF_DAYTIME_MODE,
-    CONF_DAYTIME_START,
+    CONF_MORNINGTIME_HOUR,
+    CONF_NIGHTTIME_HOUR,
     CONF_SUN_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
-    DEFAULT_DAYTIME_END,
+    DEFAULT_DAYTIME_HOUR,
     DEFAULT_DAYTIME_MODE,
-    DEFAULT_DAYTIME_START,
+    DEFAULT_MORNINGTIME_HOUR,
+    DEFAULT_NIGHTTIME_HOUR,
     DEFAULT_SUN_ENTITY,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
@@ -36,6 +38,8 @@ _LOGGER = logging.getLogger(__name__)
 class ForecastStats:
     todays_high: float | None
     todays_low: float | None
+    morningtime_high: float | None
+    morningtime_low: float | None
     daytime_high: float | None
     daytime_low: float | None
     nighttime_high: float | None
@@ -43,15 +47,18 @@ class ForecastStats:
     temperature_unit: str | None
     current_temperature: float | None = None
     forecast_points: list[ForecastPoint] = field(default_factory=list)
+    morningtime_at: datetime | None = None
     daytime_at: datetime | None = None
     nighttime_at: datetime | None = None
 
 
 @dataclass
-class _DailyExtremes:
-    day_date: date
+class _CycleExtremes:
+    cycle_start: datetime
     todays_high: float | None = None
     todays_low: float | None = None
+    morningtime_high: float | None = None
+    morningtime_low: float | None = None
     daytime_high: float | None = None
     daytime_low: float | None = None
     nighttime_high: float | None = None
@@ -64,15 +71,16 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         self.weather_entity: str = data[CONF_WEATHER_ENTITY]
         self.daytime_mode: str = data.get(CONF_DAYTIME_MODE, DEFAULT_DAYTIME_MODE)
         self.sun_entity: str = data.get(CONF_SUN_ENTITY, DEFAULT_SUN_ENTITY)
-        self.daytime_start: int = data.get(CONF_DAYTIME_START, DEFAULT_DAYTIME_START)
-        self.daytime_end: int = data.get(CONF_DAYTIME_END, DEFAULT_DAYTIME_END)
+        self.morningtime_hour: int = data.get(CONF_MORNINGTIME_HOUR, DEFAULT_MORNINGTIME_HOUR)
+        self.daytime_hour: int = data.get(CONF_DAYTIME_HOUR, DEFAULT_DAYTIME_HOUR)
+        self.nighttime_hour: int = data.get(CONF_NIGHTTIME_HOUR, DEFAULT_NIGHTTIME_HOUR)
         interval = data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
 
         self.source_object_id = self.weather_entity.split(".", 1)[-1]
         state = hass.states.get(self.weather_entity)
         self.source_name = (state.name if state else None) or self.source_object_id
 
-        self._extremes: _DailyExtremes | None = None
+        self._extremes: _CycleExtremes | None = None
 
         super().__init__(
             hass,
@@ -100,51 +108,68 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         forecast = entity_data.get("forecast") or []
         unit, current = self._read_source_state()
         now = dt_util.now()
-        sunrise, sunset = self._sun_window(now)
+        dawn, noon, dusk = self._sun_anchors(now)
+        m_at, d_at, n_at, next_m_at = _resolve_anchors(
+            now,
+            dawn,
+            noon,
+            dusk,
+            self.morningtime_hour,
+            self.daytime_hour,
+            self.nighttime_hour,
+        )
         fresh = _compute(
             forecast,
-            self.daytime_start,
-            self.daytime_end,
+            m_at,
+            d_at,
+            n_at,
+            next_m_at,
             unit,
             now,
-            sunrise=sunrise,
-            sunset=sunset,
             current_temperature=current,
         )
-        daytime_at, nighttime_at = _window_bounds(
-            now, sunrise, sunset, self.daytime_start, self.daytime_end
+        fresh = replace(
+            fresh,
+            morningtime_at=m_at,
+            daytime_at=d_at,
+            nighttime_at=n_at,
         )
-        fresh = replace(fresh, daytime_at=daytime_at, nighttime_at=nighttime_at)
-        return self._merge_extremes(fresh, now, sunrise, sunset, current)
+        return self._merge_extremes(fresh, now, m_at, d_at, n_at, next_m_at, current)
 
     def _merge_extremes(
         self,
         fresh: ForecastStats,
         now: datetime,
-        sunrise: datetime | None,
-        sunset: datetime | None,
+        m_at: datetime,
+        d_at: datetime,
+        n_at: datetime,
+        next_m_at: datetime,
         current: float | None,
     ) -> ForecastStats:
-        today = now.date()
-        if self._extremes is None or self._extremes.day_date != today:
-            self._extremes = _DailyExtremes(day_date=today)
+        if self._extremes is None or self._extremes.cycle_start != m_at:
+            self._extremes = _CycleExtremes(cycle_start=m_at)
         cache = self._extremes
 
         cache.todays_high = _max(cache.todays_high, fresh.todays_high)
         cache.todays_low = _min(cache.todays_low, fresh.todays_low)
+        cache.morningtime_high = _max(cache.morningtime_high, fresh.morningtime_high)
+        cache.morningtime_low = _min(cache.morningtime_low, fresh.morningtime_low)
         cache.daytime_high = _max(cache.daytime_high, fresh.daytime_high)
         cache.daytime_low = _min(cache.daytime_low, fresh.daytime_low)
         cache.nighttime_high = _max(cache.nighttime_high, fresh.nighttime_high)
         cache.nighttime_low = _min(cache.nighttime_low, fresh.nighttime_low)
 
-        # Fold the current observed temperature into the appropriate bucket.
         if current is not None:
             cache.todays_high = _max(cache.todays_high, current)
             cache.todays_low = _min(cache.todays_low, current)
-            if _is_daytime(now, sunrise, sunset, self.daytime_start, self.daytime_end):
+            bucket = _classify(now, m_at, d_at, n_at, next_m_at)
+            if bucket == 0:
+                cache.morningtime_high = _max(cache.morningtime_high, current)
+                cache.morningtime_low = _min(cache.morningtime_low, current)
+            elif bucket == 1:
                 cache.daytime_high = _max(cache.daytime_high, current)
                 cache.daytime_low = _min(cache.daytime_low, current)
-            else:
+            elif bucket == 2:
                 cache.nighttime_high = _max(cache.nighttime_high, current)
                 cache.nighttime_low = _min(cache.nighttime_low, current)
 
@@ -152,6 +177,8 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
             fresh,
             todays_high=cache.todays_high,
             todays_low=cache.todays_low,
+            morningtime_high=cache.morningtime_high,
+            morningtime_low=cache.morningtime_low,
             daytime_high=cache.daytime_high,
             daytime_low=cache.daytime_low,
             nighttime_high=cache.nighttime_high,
@@ -162,22 +189,25 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         """Drop the carry-forward high/low cache; next refresh starts fresh."""
         self._extremes = None
 
-    def _sun_window(self, now: datetime) -> tuple[datetime | None, datetime | None]:
+    def _sun_anchors(
+        self, now: datetime
+    ) -> tuple[datetime | None, datetime | None, datetime | None]:
         if self.daytime_mode != MODE_SUN:
-            return None, None
+            return None, None, None
         state = self.hass.states.get(self.sun_entity)
         if state is None:
             _LOGGER.debug("sun entity %s unavailable; falling back to fixed hours", self.sun_entity)
-            return None, None
-        sunrise = _today_event(state.attributes.get("next_rising"), now)
-        sunset = _today_event(state.attributes.get("next_setting"), now)
-        if sunrise is None or sunset is None:
+            return None, None, None
+        dawn = _today_event(state.attributes.get("next_dawn"), now)
+        noon = _today_event(state.attributes.get("next_noon"), now)
+        dusk = _today_event(state.attributes.get("next_dusk"), now)
+        if dawn is None or noon is None or dusk is None:
             _LOGGER.debug(
-                "sun entity %s missing next_rising/next_setting; falling back to fixed hours",
+                "sun entity %s missing next_dawn/next_noon/next_dusk; falling back to fixed hours",
                 self.sun_entity,
             )
-            return None, None
-        return sunrise, sunset
+            return None, None, None
+        return dawn, noon, dusk
 
     def _read_source_state(self) -> tuple[str | None, float | None]:
         state = self.hass.states.get(self.weather_entity)
@@ -190,10 +220,10 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
 
 
 def _today_event(raw: Any, now: datetime) -> datetime | None:
-    """Resolve a sun next_rising/next_setting attribute to today's occurrence.
+    """Resolve a sun next_* attribute to today's occurrence.
 
     The attribute is the *next* event; if its local date is after today, the
-    matching event for today already happened, so step back 24h as an estimate.
+    matching event for today already happened, so step back 24h.
     """
     if not isinstance(raw, str):
         return None
@@ -205,6 +235,52 @@ def _today_event(raw: Any, now: datetime) -> datetime | None:
     if local.date() == now.date():
         return parsed
     return parsed - timedelta(days=1)
+
+
+def _resolve_anchors(
+    now: datetime,
+    dawn: datetime | None,
+    noon: datetime | None,
+    dusk: datetime | None,
+    morningtime_hour: int,
+    daytime_hour: int,
+    nighttime_hour: int,
+) -> tuple[datetime, datetime, datetime, datetime]:
+    """Return (morningtime, daytime, nighttime, next_morningtime) for the cycle containing `now`.
+
+    A cycle runs morningtime → next morningtime (~24h). When `now` is before
+    today's morningtime we're in yesterday's cycle, so the anchors slide back
+    a day. When `now` is after, today's anchors are active and the cycle ends
+    at tomorrow's morningtime.
+    """
+    if dawn is not None and noon is not None and dusk is not None:
+        m_today, d_today, n_today = dawn, noon, dusk
+    else:
+        base = now.replace(minute=0, second=0, microsecond=0)
+        m_today = base.replace(hour=morningtime_hour)
+        d_today = base.replace(hour=daytime_hour)
+        n_today = base.replace(hour=nighttime_hour)
+    one_day = timedelta(days=1)
+    if now >= m_today:
+        return m_today, d_today, n_today, m_today + one_day
+    return m_today - one_day, d_today - one_day, n_today - one_day, m_today
+
+
+def _classify(
+    point: datetime,
+    m: datetime,
+    d: datetime,
+    n: datetime,
+    next_m: datetime,
+) -> int | None:
+    """Return 0=morning, 1=daytime, 2=nighttime, or None if outside the cycle."""
+    if point < m or point >= next_m:
+        return None
+    if point < d:
+        return 0
+    if point < n:
+        return 1
+    return 2
 
 
 def _max(a: float | None, b: float | None) -> float | None:
@@ -223,57 +299,17 @@ def _min(a: float | None, b: float | None) -> float | None:
     return min(a, b)
 
 
-def _window_bounds(
-    now: datetime,
-    sunrise: datetime | None,
-    sunset: datetime | None,
-    daytime_start: int,
-    daytime_end: int,
-) -> tuple[datetime | None, datetime | None]:
-    """Resolve when today's daytime and nighttime windows begin.
-
-    In sun mode (sunrise/sunset present) returns those datetimes directly.
-    In fixed mode, anchors today's local date at the configured hour and
-    promotes back to the active timezone.
-    """
-    if sunrise is not None and sunset is not None:
-        return sunrise, sunset
-    base = now.replace(minute=0, second=0, microsecond=0)
-    daytime_at = base.replace(hour=daytime_start)
-    nighttime_at = (
-        base.replace(hour=0) + timedelta(hours=daytime_end)
-        if daytime_end == 24
-        else base.replace(hour=daytime_end)
-    )
-    return daytime_at, nighttime_at
-
-
-def _is_daytime(
-    now: datetime,
-    sunrise: datetime | None,
-    sunset: datetime | None,
-    daytime_start: int,
-    daytime_end: int,
-) -> bool:
-    if sunrise is not None and sunset is not None:
-        return sunrise <= now < sunset
-    return daytime_start <= now.hour < daytime_end
-
-
 def _compute(
     forecast: list[dict[str, Any]],
-    daytime_start: int,
-    daytime_end: int,
+    m_at: datetime,
+    d_at: datetime,
+    n_at: datetime,
+    next_m_at: datetime,
     unit: str | None,
     now: datetime,
-    sunrise: datetime | None = None,
-    sunset: datetime | None = None,
     current_temperature: float | None = None,
 ) -> ForecastStats:
-    tz = now.tzinfo
-    today = now.date()
-    use_sun = sunrise is not None and sunset is not None
-    day, daytime, night = [], [], []
+    cycle, morningtime, daytime, nighttime = [], [], [], []
     points: list[ForecastPoint] = []
 
     for point in forecast:
@@ -296,26 +332,26 @@ def _compute(
 
         if temp is None:
             continue
-        local = parsed.astimezone(tz) if tz is not None else dt_util.as_local(parsed)
-        if local.date() != today:
+        bucket = _classify(parsed, m_at, d_at, n_at, next_m_at)
+        if bucket is None:
             continue
-        day.append(temp)
-        if use_sun:
-            is_daytime = sunrise <= parsed < sunset
-        else:
-            is_daytime = daytime_start <= local.hour < daytime_end
-        if is_daytime:
+        cycle.append(temp)
+        if bucket == 0:
+            morningtime.append(temp)
+        elif bucket == 1:
             daytime.append(temp)
         else:
-            night.append(temp)
+            nighttime.append(temp)
 
     return ForecastStats(
-        todays_high=max(day) if day else None,
-        todays_low=min(day) if day else None,
+        todays_high=max(cycle) if cycle else None,
+        todays_low=min(cycle) if cycle else None,
+        morningtime_high=max(morningtime) if morningtime else None,
+        morningtime_low=min(morningtime) if morningtime else None,
         daytime_high=max(daytime) if daytime else None,
         daytime_low=min(daytime) if daytime else None,
-        nighttime_high=max(night) if night else None,
-        nighttime_low=min(night) if night else None,
+        nighttime_high=max(nighttime) if nighttime else None,
+        nighttime_low=min(nighttime) if nighttime else None,
         temperature_unit=unit,
         current_temperature=current_temperature,
         forecast_points=points,
