@@ -1,12 +1,15 @@
 # Weather Plus
 
 Home Assistant custom integration that wraps a source `weather` entity's hourly forecast and exposes
-aggregate sensors for the current cycle (morningtime → next morningtime):
+aggregate sensors for the current cycle (morningtime → next morningtime). Window aggregates
+are scoped to the part of the day where the extreme is meaningful — e.g. `daytime_high` is
+the afternoon peak, distinct from `todays_high` which can land in the morning if a cold front
+passes through:
 
 - `sensor.<name>_todays_high` / `_todays_low` — across the full cycle
-- `sensor.<name>_morningtime_high` / `_morningtime_low` — morningtime → daytime
-- `sensor.<name>_daytime_high` / `_daytime_low` — daytime → nighttime
-- `sensor.<name>_nighttime_high` / `_nighttime_low` — nighttime → next morningtime
+- `sensor.<name>_morningtime_low` — pre-dawn cold (morningtime → daytime window)
+- `sensor.<name>_daytime_high` — afternoon peak (daytime → nighttime window)
+- `sensor.<name>_nighttime_low` — overnight cold (nighttime → next morningtime window)
 - `sensor.<name>_morningtime` / `_daytime` / `_nighttime` — timestamps anchoring each window
 
 ## Install via HACS

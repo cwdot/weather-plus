@@ -32,11 +32,8 @@ def _stats(**kwargs) -> ForecastStats:
     base = dict(
         todays_high=None,
         todays_low=None,
-        morningtime_high=None,
         morningtime_low=None,
         daytime_high=None,
-        daytime_low=None,
-        nighttime_high=None,
         nighttime_low=None,
         temperature_unit="°F",
     )
@@ -50,44 +47,37 @@ def test_initial_merge_seeds_cache():
     fresh = _stats(
         todays_high=80,
         todays_low=60,
-        morningtime_high=70,
         morningtime_low=60,
         daytime_high=80,
-        daytime_low=72,
-        nighttime_high=65,
-        nighttime_low=60,
+        nighttime_low=62,
     )
     out = coord._merge_extremes(fresh, _NOW, m, d, n, next_m, current=None)
     assert out.todays_high == 80
-    assert out.morningtime_high == 70
+    assert out.todays_low == 60
+    assert out.morningtime_low == 60
     assert out.daytime_high == 80
-    assert out.nighttime_low == 60
+    assert out.nighttime_low == 62
 
 
 def test_running_high_does_not_decrease_within_cycle():
     coord = _make_coordinator()
     m, d, n, next_m = _anchors()
-    coord._merge_extremes(
-        _stats(daytime_high=85, daytime_low=70), _NOW, m, d, n, next_m, current=None
-    )
-    out = coord._merge_extremes(
-        _stats(daytime_high=78, daytime_low=78), _NOW, m, d, n, next_m, current=None
-    )
+    coord._merge_extremes(_stats(daytime_high=85), _NOW, m, d, n, next_m, current=None)
+    out = coord._merge_extremes(_stats(daytime_high=78), _NOW, m, d, n, next_m, current=None)
     assert out.daytime_high == 85
-    assert out.daytime_low == 70
 
 
 def test_running_low_does_not_increase_within_cycle():
     coord = _make_coordinator()
     m, d, n, next_m = _anchors()
     coord._merge_extremes(
-        _stats(todays_low=55, todays_high=80), _NOW, m, d, n, next_m, current=None
+        _stats(todays_low=55, morningtime_low=55), _NOW, m, d, n, next_m, current=None
     )
     out = coord._merge_extremes(
-        _stats(todays_low=70, todays_high=82), _NOW, m, d, n, next_m, current=None
+        _stats(todays_low=70, morningtime_low=70), _NOW, m, d, n, next_m, current=None
     )
     assert out.todays_low == 55
-    assert out.todays_high == 82
+    assert out.morningtime_low == 55
 
 
 def test_cache_resets_on_new_cycle():
@@ -109,14 +99,12 @@ def test_cache_persists_across_post_midnight_in_same_cycle():
     """3am the next day is still inside the current night window — cache should not reset."""
     coord = _make_coordinator()
     m, d, n, next_m = _anchors()
-    coord._merge_extremes(
-        _stats(nighttime_high=60, nighttime_low=55), _NOW, m, d, n, next_m, current=None
-    )
+    coord._merge_extremes(_stats(nighttime_low=55), _NOW, m, d, n, next_m, current=None)
     post_midnight = _NOW.replace(hour=3) + timedelta(days=1)
     m2, d2, n2, next_m2 = _anchors(post_midnight)
     assert m2 == m  # same cycle anchor
     out = coord._merge_extremes(
-        _stats(nighttime_high=58, nighttime_low=50),
+        _stats(nighttime_low=50),
         post_midnight,
         m2,
         d2,
@@ -124,15 +112,14 @@ def test_cache_persists_across_post_midnight_in_same_cycle():
         next_m2,
         current=None,
     )
-    assert out.nighttime_high == 60  # carried forward
     assert out.nighttime_low == 50
 
 
-def test_current_temperature_folds_into_daytime_at_noon():
+def test_current_temperature_folds_into_daytime_high_at_noon():
     coord = _make_coordinator()
     m, d, n, next_m = _anchors()
     out = coord._merge_extremes(
-        _stats(daytime_high=80, daytime_low=72),
+        _stats(daytime_high=80),
         _NOW,
         m,
         d,
@@ -142,16 +129,17 @@ def test_current_temperature_folds_into_daytime_at_noon():
     )
     assert out.daytime_high == 85
     assert out.todays_high == 85
-    assert out.morningtime_high is None
-    assert out.nighttime_high is None
+    assert out.morningtime_low is None
+    assert out.nighttime_low is None
 
 
-def test_current_temperature_folds_into_morningtime_at_dawn():
+def test_current_temperature_does_not_fold_into_morningtime_high():
+    """Morningtime tracks only the low — a warm current temp at dawn must not raise it."""
     coord = _make_coordinator()
     early = _NOW.replace(hour=8)
     m, d, n, next_m = _anchors(early)
     out = coord._merge_extremes(
-        _stats(morningtime_high=68, morningtime_low=60),
+        _stats(morningtime_low=60),
         early,
         m,
         d,
@@ -159,16 +147,33 @@ def test_current_temperature_folds_into_morningtime_at_dawn():
         next_m,
         current=70,
     )
-    assert out.morningtime_high == 70
-    assert out.daytime_high is None
+    assert out.morningtime_low == 60
+    assert out.daytime_high is None  # current temp is in morningtime bucket, not daytime
 
 
-def test_current_temperature_folds_into_night_after_dusk():
+def test_current_temperature_folds_into_morningtime_low_when_colder():
+    coord = _make_coordinator()
+    early = _NOW.replace(hour=8)
+    m, d, n, next_m = _anchors(early)
+    out = coord._merge_extremes(
+        _stats(morningtime_low=60),
+        early,
+        m,
+        d,
+        n,
+        next_m,
+        current=55,
+    )
+    assert out.morningtime_low == 55
+    assert out.todays_low == 55
+
+
+def test_current_temperature_folds_into_nighttime_low_after_dusk():
     coord = _make_coordinator()
     late = _NOW.replace(hour=23)
     m, d, n, next_m = _anchors(late)
     out = coord._merge_extremes(
-        _stats(nighttime_high=65, nighttime_low=58),
+        _stats(nighttime_low=58),
         late,
         m,
         d,
@@ -177,27 +182,21 @@ def test_current_temperature_folds_into_night_after_dusk():
         current=55,
     )
     assert out.nighttime_low == 55
-    assert out.daytime_low is None
 
 
 def test_none_buckets_in_fresh_do_not_clobber_cache():
     coord = _make_coordinator()
     m, d, n, next_m = _anchors()
-    coord._merge_extremes(
-        _stats(daytime_high=85, daytime_low=72), _NOW, m, d, n, next_m, current=None
-    )
-    out = coord._merge_extremes(
-        _stats(daytime_high=None, daytime_low=None), _NOW, m, d, n, next_m, current=None
-    )
+    coord._merge_extremes(_stats(daytime_high=85), _NOW, m, d, n, next_m, current=None)
+    out = coord._merge_extremes(_stats(daytime_high=None), _NOW, m, d, n, next_m, current=None)
     assert out.daytime_high == 85
-    assert out.daytime_low == 72
 
 
 def test_extremes_dataclass_initial_state():
     cache = _CycleExtremes(cycle_start=_NOW)
     assert cache.todays_high is None
     assert cache.morningtime_low is None
-    assert cache.daytime_low is None
+    assert cache.daytime_high is None
     assert cache.nighttime_low is None
 
 

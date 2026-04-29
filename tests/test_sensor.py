@@ -16,11 +16,8 @@ def _build(target_unit: str | None, source_unit: str, value: float | None = 100.
         data=ForecastStats(
             todays_high=value,
             todays_low=None,
-            morningtime_high=None,
             morningtime_low=None,
             daytime_high=None,
-            daytime_low=None,
-            nighttime_high=None,
             nighttime_low=None,
             temperature_unit=source_unit,
         ),

@@ -28,8 +28,8 @@ def _fixed_anchors(now: datetime = _NOW) -> tuple[datetime, datetime, datetime, 
 def test_partitions_by_window():
     m, d, n, next_m = _fixed_anchors()
     forecast = [
-        _fc(_at(2), 50),  # before today's morningtime → outside cycle (yesterday's night)
-        _fc(_at(8), 60),  # morning
+        _fc(_at(2), 50),  # before today's morningtime → outside cycle
+        _fc(_at(8), 60),  # morningtime
         _fc(_at(14), 75),  # daytime
         _fc(_at(20), 65),  # nighttime (start inclusive)
         _fc(_at(23), 55),  # nighttime
@@ -37,11 +37,8 @@ def test_partitions_by_window():
     stats = _compute(forecast, m, d, n, next_m, "°F", _NOW)
     assert stats.todays_high == 75
     assert stats.todays_low == 55
-    assert stats.morningtime_high == 60
     assert stats.morningtime_low == 60
     assert stats.daytime_high == 75
-    assert stats.daytime_low == 75
-    assert stats.nighttime_high == 65
     assert stats.nighttime_low == 55
     assert stats.temperature_unit == "°F"
 
@@ -55,8 +52,8 @@ def test_includes_post_midnight_in_nighttime_window():
         _fc(_at(6, day_offset=1), 55),  # tomorrow's morningtime → outside this cycle
     ]
     stats = _compute(forecast, m, d, n, next_m, None, _NOW)
-    assert stats.nighttime_high == 60
     assert stats.nighttime_low == 50
+    assert stats.todays_low == 50
 
 
 def test_skips_invalid_points():
@@ -70,7 +67,7 @@ def test_skips_invalid_points():
     ]
     stats = _compute(forecast, m, d, n, next_m, None, _NOW)
     assert stats.daytime_high == 70
-    assert stats.daytime_low == 70
+    assert stats.todays_high == 70
 
 
 def test_empty_buckets_yield_none():
@@ -78,9 +75,7 @@ def test_empty_buckets_yield_none():
     forecast = [_fc(_at(14), 75)]
     stats = _compute(forecast, m, d, n, next_m, None, _NOW)
     assert stats.daytime_high == 75
-    assert stats.morningtime_high is None
     assert stats.morningtime_low is None
-    assert stats.nighttime_high is None
     assert stats.nighttime_low is None
 
 
@@ -88,22 +83,22 @@ def test_empty_forecast():
     m, d, n, next_m = _fixed_anchors()
     stats = _compute([], m, d, n, next_m, None, _NOW)
     assert stats.todays_high is None
-    assert stats.morningtime_high is None
+    assert stats.morningtime_low is None
     assert stats.daytime_high is None
-    assert stats.nighttime_high is None
+    assert stats.nighttime_low is None
 
 
 def test_window_boundaries_are_half_open():
     m, d, n, next_m = _fixed_anchors()
     forecast = [
-        _fc(_at(6), 60),  # morning (start inclusive)
+        _fc(_at(6), 60),  # morningtime (start inclusive)
         _fc(_at(12), 75),  # daytime (start inclusive)
         _fc(_at(20), 70),  # nighttime (start inclusive)
     ]
     stats = _compute(forecast, m, d, n, next_m, None, _NOW)
-    assert stats.morningtime_high == 60
+    assert stats.morningtime_low == 60
     assert stats.daytime_high == 75
-    assert stats.nighttime_high == 70
+    assert stats.nighttime_low == 70
 
 
 def test_sun_anchors_override_fixed_hours():
@@ -115,16 +110,15 @@ def test_sun_anchors_override_fixed_hours():
     assert d == noon
     assert n == dusk
     forecast = [
-        _fc(_at(6), 50),  # before dawn → outside (yesterday's night)
-        _fc(_at(7), 55),  # dawn → morning
+        _fc(_at(6), 50),  # before dawn → outside
+        _fc(_at(7), 55),  # dawn → morningtime
         _fc(_at(13), 75),  # noon → daytime
         _fc(_at(19), 65),  # dusk → nighttime
         _fc(_at(22), 58),  # nighttime
     ]
     stats = _compute(forecast, m, d, n, next_m, None, _NOW)
-    assert stats.morningtime_high == 55
+    assert stats.morningtime_low == 55
     assert stats.daytime_high == 75
-    assert stats.nighttime_high == 65
     assert stats.nighttime_low == 58
 
 

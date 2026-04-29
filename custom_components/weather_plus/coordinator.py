@@ -38,11 +38,8 @@ _LOGGER = logging.getLogger(__name__)
 class ForecastStats:
     todays_high: float | None
     todays_low: float | None
-    morningtime_high: float | None
     morningtime_low: float | None
     daytime_high: float | None
-    daytime_low: float | None
-    nighttime_high: float | None
     nighttime_low: float | None
     temperature_unit: str | None
     current_temperature: float | None = None
@@ -57,11 +54,8 @@ class _CycleExtremes:
     cycle_start: datetime
     todays_high: float | None = None
     todays_low: float | None = None
-    morningtime_high: float | None = None
     morningtime_low: float | None = None
     daytime_high: float | None = None
-    daytime_low: float | None = None
-    nighttime_high: float | None = None
     nighttime_low: float | None = None
 
 
@@ -152,11 +146,8 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
 
         cache.todays_high = _max(cache.todays_high, fresh.todays_high)
         cache.todays_low = _min(cache.todays_low, fresh.todays_low)
-        cache.morningtime_high = _max(cache.morningtime_high, fresh.morningtime_high)
         cache.morningtime_low = _min(cache.morningtime_low, fresh.morningtime_low)
         cache.daytime_high = _max(cache.daytime_high, fresh.daytime_high)
-        cache.daytime_low = _min(cache.daytime_low, fresh.daytime_low)
-        cache.nighttime_high = _max(cache.nighttime_high, fresh.nighttime_high)
         cache.nighttime_low = _min(cache.nighttime_low, fresh.nighttime_low)
 
         if current is not None:
@@ -164,24 +155,18 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
             cache.todays_low = _min(cache.todays_low, current)
             bucket = _classify(now, m_at, d_at, n_at, next_m_at)
             if bucket == 0:
-                cache.morningtime_high = _max(cache.morningtime_high, current)
                 cache.morningtime_low = _min(cache.morningtime_low, current)
             elif bucket == 1:
                 cache.daytime_high = _max(cache.daytime_high, current)
-                cache.daytime_low = _min(cache.daytime_low, current)
             elif bucket == 2:
-                cache.nighttime_high = _max(cache.nighttime_high, current)
                 cache.nighttime_low = _min(cache.nighttime_low, current)
 
         return replace(
             fresh,
             todays_high=cache.todays_high,
             todays_low=cache.todays_low,
-            morningtime_high=cache.morningtime_high,
             morningtime_low=cache.morningtime_low,
             daytime_high=cache.daytime_high,
-            daytime_low=cache.daytime_low,
-            nighttime_high=cache.nighttime_high,
             nighttime_low=cache.nighttime_low,
         )
 
@@ -346,11 +331,8 @@ def _compute(
     return ForecastStats(
         todays_high=max(cycle) if cycle else None,
         todays_low=min(cycle) if cycle else None,
-        morningtime_high=max(morningtime) if morningtime else None,
         morningtime_low=min(morningtime) if morningtime else None,
         daytime_high=max(daytime) if daytime else None,
-        daytime_low=min(daytime) if daytime else None,
-        nighttime_high=max(nighttime) if nighttime else None,
         nighttime_low=min(nighttime) if nighttime else None,
         temperature_unit=unit,
         current_temperature=current_temperature,

@@ -43,11 +43,8 @@ class _TimestampSpec(SensorEntityDescription):
 _FORECAST_SPECS: tuple[_Spec, ...] = (
     _Spec(key="todays_high", name="Today's High", value_fn=lambda s: s.todays_high),
     _Spec(key="todays_low", name="Today's Low", value_fn=lambda s: s.todays_low),
-    _Spec(key="morningtime_high", name="Morningtime High", value_fn=lambda s: s.morningtime_high),
     _Spec(key="morningtime_low", name="Morningtime Low", value_fn=lambda s: s.morningtime_low),
     _Spec(key="daytime_high", name="Daytime High", value_fn=lambda s: s.daytime_high),
-    _Spec(key="daytime_low", name="Daytime Low", value_fn=lambda s: s.daytime_low),
-    _Spec(key="nighttime_high", name="Nighttime High", value_fn=lambda s: s.nighttime_high),
     _Spec(key="nighttime_low", name="Nighttime Low", value_fn=lambda s: s.nighttime_low),
 )
 
