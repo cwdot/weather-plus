@@ -33,6 +33,8 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+_STALE_FALLBACK_AFTER = timedelta(hours=2)
+
 
 @dataclass
 class ForecastStats:
@@ -75,6 +77,7 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         self.source_name = (state.name if state else None) or self.source_object_id
 
         self._extremes: _CycleExtremes | None = None
+        self._last_success: datetime | None = None
 
         super().__init__(
             hass,
@@ -84,23 +87,6 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         )
 
     async def _async_update_data(self) -> ForecastStats:
-        try:
-            response = await self.hass.services.async_call(
-                "weather",
-                "get_forecasts",
-                {"entity_id": self.weather_entity, "type": "hourly"},
-                blocking=True,
-                return_response=True,
-            )
-        except Exception as err:
-            raise UpdateFailed(f"forecast call failed: {err}") from err
-
-        entity_data = (response or {}).get(self.weather_entity)
-        if not entity_data:
-            raise UpdateFailed(f"no forecast for {self.weather_entity}")
-
-        forecast = entity_data.get("forecast") or []
-        unit, current = self._read_source_state()
         now = dt_util.now()
         dawn, noon, dusk = self._sun_anchors(now)
         m_at, d_at, n_at, next_m_at = _resolve_anchors(
@@ -112,6 +98,23 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
             self.daytime_hour,
             self.nighttime_hour,
         )
+
+        try:
+            response = await self.hass.services.async_call(
+                "weather",
+                "get_forecasts",
+                {"entity_id": self.weather_entity, "type": "hourly"},
+                blocking=True,
+                return_response=True,
+            )
+            entity_data = (response or {}).get(self.weather_entity)
+            if not entity_data:
+                raise RuntimeError(f"no forecast for {self.weather_entity}")
+            forecast = entity_data.get("forecast") or []
+        except Exception as err:
+            return self._fallback(err, now, m_at, d_at, n_at, next_m_at)
+
+        unit, current = self._read_source_state()
         fresh = _compute(
             forecast,
             m_at,
@@ -128,7 +131,51 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
             daytime_at=d_at,
             nighttime_at=n_at,
         )
-        return self._merge_extremes(fresh, now, m_at, d_at, n_at, next_m_at, current)
+        merged = self._merge_extremes(fresh, now, m_at, d_at, n_at, next_m_at, current)
+        self._last_success = now
+        return merged
+
+    def _fallback(
+        self,
+        err: Exception,
+        now: datetime,
+        m_at: datetime,
+        d_at: datetime,
+        n_at: datetime,
+        next_m_at: datetime,
+    ) -> ForecastStats:
+        """Serve cached aggregates + live current-temp when the forecast call fails."""
+        if self._last_success is None:
+            raise UpdateFailed(f"forecast unavailable, no cached data: {err}") from err
+        age = now - self._last_success
+        if age > _STALE_FALLBACK_AFTER:
+            raise UpdateFailed(
+                f"forecast unavailable for {age}, exceeding stale window: {err}"
+            ) from err
+
+        unit, current = self._read_source_state()
+        if unit is None and self.data is not None:
+            unit = self.data.temperature_unit
+        _LOGGER.warning(
+            "forecast for %s unavailable, serving cached aggregates (age=%s): %s",
+            self.weather_entity,
+            age,
+            err,
+        )
+        empty = ForecastStats(
+            todays_high=None,
+            todays_low=None,
+            morningtime_low=None,
+            daytime_high=None,
+            nighttime_low=None,
+            temperature_unit=unit,
+            current_temperature=current,
+            forecast_points=[],
+            morningtime_at=m_at,
+            daytime_at=d_at,
+            nighttime_at=n_at,
+        )
+        return self._merge_extremes(empty, now, m_at, d_at, n_at, next_m_at, current)
 
     def _merge_extremes(
         self,

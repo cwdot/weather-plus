@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+from homeassistant.helpers.update_coordinator import UpdateFailed
+
 from custom_components.weather_plus.coordinator import (
     ForecastStats,
     WeatherPlusCoordinator,
@@ -18,6 +21,9 @@ def _make_coordinator() -> WeatherPlusCoordinator:
     """Build a coordinator without invoking DataUpdateCoordinator.__init__."""
     coord = WeatherPlusCoordinator.__new__(WeatherPlusCoordinator)
     coord._extremes = None
+    coord._last_success = None
+    coord.weather_entity = "weather.test"
+    coord.data = None
     coord.morningtime_hour = 6
     coord.daytime_hour = 12
     coord.nighttime_hour = 20
@@ -212,6 +218,90 @@ def test_reset_extremes_drops_running_values():
     )
     assert out.todays_high == 70
     assert out.todays_low == 60
+
+
+def test_fallback_raises_when_never_succeeded():
+    coord = _make_coordinator()
+    m, d, n, next_m = _anchors()
+    with pytest.raises(UpdateFailed):
+        coord._fallback(RuntimeError("boom"), _NOW, m, d, n, next_m)
+
+
+def test_fallback_serves_cached_extremes_with_live_current_temp():
+    coord = _make_coordinator()
+    coord._read_source_state = lambda: ("°F", 72.0)
+    m, d, n, next_m = _anchors()
+    coord._merge_extremes(
+        _stats(todays_high=85, daytime_high=85, todays_low=60, morningtime_low=60),
+        _NOW,
+        m,
+        d,
+        n,
+        next_m,
+        current=None,
+    )
+    coord._last_success = _NOW
+
+    later = _NOW + timedelta(minutes=15)
+    out = coord._fallback(RuntimeError("upstream gone"), later, m, d, n, next_m)
+
+    assert out.daytime_high == 85
+    assert out.todays_high == 85
+    assert out.morningtime_low == 60
+    assert out.current_temperature == 72.0
+    assert out.temperature_unit == "°F"
+    assert out.morningtime_at == m
+    assert out.daytime_at == d
+    assert out.nighttime_at == n
+    assert out.forecast_points == []
+
+
+def test_fallback_folds_current_temp_into_extremes():
+    """A new high observed during an outage should still update the running max."""
+    coord = _make_coordinator()
+    coord._read_source_state = lambda: ("°F", 90.0)
+    m, d, n, next_m = _anchors()
+    coord._merge_extremes(_stats(daytime_high=85), _NOW, m, d, n, next_m, current=None)
+    coord._last_success = _NOW
+
+    out = coord._fallback(RuntimeError("flap"), _NOW, m, d, n, next_m)
+    assert out.daytime_high == 90.0
+    assert out.todays_high == 90.0
+
+
+def test_fallback_raises_after_stale_window():
+    coord = _make_coordinator()
+    coord._read_source_state = lambda: ("°F", 70.0)
+    coord._last_success = _NOW
+    m, d, n, next_m = _anchors()
+    with pytest.raises(UpdateFailed):
+        coord._fallback(RuntimeError("still gone"), _NOW + timedelta(hours=3), m, d, n, next_m)
+
+
+def test_fallback_falls_back_to_previous_unit_when_source_missing():
+    coord = _make_coordinator()
+    coord._read_source_state = lambda: (None, None)
+    coord.data = _stats(temperature_unit="°C")
+    coord._last_success = _NOW
+    m, d, n, next_m = _anchors()
+    out = coord._fallback(RuntimeError("ghost"), _NOW, m, d, n, next_m)
+    assert out.temperature_unit == "°C"
+
+
+def test_fallback_resets_extremes_when_cycle_rolls_over():
+    """If the parent stays down across the morningtime boundary, old highs shouldn't bleed in."""
+    coord = _make_coordinator()
+    coord._read_source_state = lambda: ("°F", 50.0)
+    m, d, n, next_m = _anchors()
+    coord._merge_extremes(_stats(todays_high=99), _NOW, m, d, n, next_m, current=None)
+    coord._last_success = _NOW
+
+    next_day = _NOW + timedelta(days=1)
+    m2, d2, n2, next_m2 = _anchors(next_day)
+    # bump last_success to within the stale window relative to next_day
+    coord._last_success = next_day - timedelta(minutes=30)
+    out = coord._fallback(RuntimeError("still down"), next_day, m2, d2, n2, next_m2)
+    assert out.todays_high == 50.0  # seeded from current temp on the new cycle
 
 
 def test_forecast_points_and_unit_pass_through():
