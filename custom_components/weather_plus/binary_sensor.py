@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -28,16 +31,21 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    if not entry.options.get(CONF_ENABLE_CONDITIONS, DEFAULT_ENABLE_CONDITIONS):
-        return
-
     coordinator: WeatherPlusCoordinator = hass.data[DOMAIN][entry.entry_id]
-    cold = float(entry.options.get(CONF_COLD_THRESHOLD, DEFAULT_COLD_THRESHOLD))
-    hot = float(entry.options.get(CONF_HOT_THRESHOLD, DEFAULT_HOT_THRESHOLD))
+    entities: list[BinarySensorEntity] = []
 
-    async_add_entities(
-        _ConditionBinarySensor(coordinator, entry, spec, cold, hot) for spec in CONDITION_SPECS
-    )
+    if entry.options.get(CONF_ENABLE_CONDITIONS, DEFAULT_ENABLE_CONDITIONS):
+        cold = float(entry.options.get(CONF_COLD_THRESHOLD, DEFAULT_COLD_THRESHOLD))
+        hot = float(entry.options.get(CONF_HOT_THRESHOLD, DEFAULT_HOT_THRESHOLD))
+        entities.extend(
+            _ConditionBinarySensor(coordinator, entry, spec, cold, hot) for spec in CONDITION_SPECS
+        )
+
+    if coordinator.mower_precip_entity and coordinator.mower_temperature_entity:
+        entities.append(_MowerBinarySensor(coordinator, entry))
+
+    if entities:
+        async_add_entities(entities)
 
 
 class _ConditionBinarySensor(CoordinatorEntity[WeatherPlusCoordinator], BinarySensorEntity):
@@ -75,3 +83,42 @@ class _ConditionBinarySensor(CoordinatorEntity[WeatherPlusCoordinator], BinarySe
             self._cold,
             self._hot,
         )
+
+
+class _MowerBinarySensor(CoordinatorEntity[WeatherPlusCoordinator], BinarySensorEntity):
+    """Wet/blocked when the moisture-balance model says the lawn is too wet to mow."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.MOISTURE
+    _attr_name = "Mower"
+
+    def __init__(
+        self,
+        coordinator: WeatherPlusCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_mower"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id, "mower")},
+            name=f"{coordinator.source_object_id} Mower",
+            manufacturer="Weather Plus",
+            model="Mower readiness",
+            via_device=(DOMAIN, entry.entry_id),
+        )
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.coordinator.data.mower is not None
+
+    @property
+    def is_on(self) -> bool | None:
+        mower = self.coordinator.data.mower
+        return mower.is_wet if mower is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, float] | None:
+        mower = self.coordinator.data.mower
+        if mower is None:
+            return None
+        return {"moisture_mm": round(mower.moisture_mm, 2)}

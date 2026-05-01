@@ -46,6 +46,7 @@ class ForecastPoint:
     when: datetime
     temperature: float | None
     condition: str | None
+    precipitation_probability: float | None = None
 
 
 _PredicateFactory = Callable[[float, float], Callable[[ForecastPoint], bool]]

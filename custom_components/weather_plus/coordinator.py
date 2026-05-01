@@ -7,16 +7,22 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Any
 
+from homeassistant.components.recorder import get_instance as recorder_get_instance
+from homeassistant.components.recorder.history import state_changes_during_period
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.const import UnitOfTemperature
+from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_conversion import TemperatureConverter
 
 from .conditions import ForecastPoint
 from .const import (
     CONF_DAYTIME_HOUR,
     CONF_DAYTIME_MODE,
     CONF_MORNINGTIME_HOUR,
+    CONF_MOWER_PRECIP_ENTITY,
+    CONF_MOWER_TEMPERATURE_ENTITY,
     CONF_NIGHTTIME_HOUR,
     CONF_SUN_ENTITY,
     CONF_UPDATE_INTERVAL,
@@ -30,10 +36,27 @@ from .const import (
     DOMAIN,
     MODE_SUN,
 )
+from .mower import (
+    DEFAULT_DRYING_RATES,
+    DEFAULT_LOOKBACK,
+    DEFAULT_PRECIP_RATE_MM_PER_HOUR,
+    MowerForecastPoint,
+    MowerReading,
+    compute_average_precip_rate,
+    compute_moisture_balance,
+    predict_ready_time,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 _STALE_FALLBACK_AFTER = timedelta(hours=2)
+
+
+@dataclass(frozen=True)
+class MowerState:
+    moisture_mm: float
+    is_wet: bool
+    predicted_ready_at: datetime | None
 
 
 @dataclass
@@ -49,6 +72,7 @@ class ForecastStats:
     morningtime_at: datetime | None = None
     daytime_at: datetime | None = None
     nighttime_at: datetime | None = None
+    mower: MowerState | None = None
 
 
 @dataclass
@@ -70,6 +94,8 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         self.morningtime_hour: int = data.get(CONF_MORNINGTIME_HOUR, DEFAULT_MORNINGTIME_HOUR)
         self.daytime_hour: int = data.get(CONF_DAYTIME_HOUR, DEFAULT_DAYTIME_HOUR)
         self.nighttime_hour: int = data.get(CONF_NIGHTTIME_HOUR, DEFAULT_NIGHTTIME_HOUR)
+        self.mower_precip_entity: str | None = data.get(CONF_MOWER_PRECIP_ENTITY) or None
+        self.mower_temperature_entity: str | None = data.get(CONF_MOWER_TEMPERATURE_ENTITY) or None
         interval = data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
 
         self.source_object_id = self.weather_entity.split(".", 1)[-1]
@@ -112,7 +138,9 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
                 raise RuntimeError(f"no forecast for {self.weather_entity}")
             forecast = entity_data.get("forecast") or []
         except Exception as err:
-            return self._fallback(err, now, m_at, d_at, n_at, next_m_at)
+            base = self._fallback(err, now, m_at, d_at, n_at, next_m_at)
+            mower = await self._compute_mower(now, base.forecast_points, base.temperature_unit)
+            return replace(base, mower=mower)
 
         unit, current = self._read_source_state()
         fresh = _compute(
@@ -132,8 +160,55 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
             nighttime_at=n_at,
         )
         merged = self._merge_extremes(fresh, now, m_at, d_at, n_at, next_m_at, current)
+        mower = await self._compute_mower(now, merged.forecast_points, merged.temperature_unit)
+        merged = replace(merged, mower=mower)
         self._last_success = now
         return merged
+
+    async def _compute_mower(
+        self,
+        now: datetime,
+        forecast_points: list[ForecastPoint],
+        forecast_unit: str | None,
+    ) -> MowerState | None:
+        if not self.mower_precip_entity or not self.mower_temperature_entity:
+            return None
+
+        start = now - DEFAULT_LOOKBACK
+        try:
+            instance = recorder_get_instance(self.hass)
+            history = await instance.async_add_executor_job(
+                _fetch_history,
+                self.hass,
+                start,
+                now,
+                self.mower_precip_entity,
+                self.mower_temperature_entity,
+            )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("mower history fetch failed: %s", err)
+            return None
+
+        precip_states = history.get(self.mower_precip_entity, [])
+        temp_states = history.get(self.mower_temperature_entity, [])
+
+        readings = _build_mower_readings(precip_states, temp_states)
+        moisture = compute_moisture_balance(readings, DEFAULT_DRYING_RATES)
+        is_wet = moisture > 0
+
+        predicted_ready: datetime | None = None
+        if is_wet:
+            avg_rate = compute_average_precip_rate(readings, DEFAULT_PRECIP_RATE_MM_PER_HOUR)
+            mower_forecast = _to_mower_forecast(forecast_points, forecast_unit)
+            predicted_ready = predict_ready_time(
+                moisture, mower_forecast, avg_rate, DEFAULT_DRYING_RATES
+            )
+
+        return MowerState(
+            moisture_mm=moisture,
+            is_wet=is_wet,
+            predicted_ready_at=predicted_ready,
+        )
 
     def _fallback(
         self,
@@ -251,6 +326,98 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         return unit, current
 
 
+def _fetch_history(
+    hass: HomeAssistant,
+    start: datetime,
+    end: datetime,
+    *entity_ids: str,
+) -> dict[str, list[State]]:
+    """Recorder lookup for a few entity ids over a time window. Runs in executor."""
+    merged: dict[str, list[State]] = {}
+    for entity_id in entity_ids:
+        result = state_changes_during_period(hass, start, end, entity_id=entity_id)
+        merged.update(result)
+    return merged
+
+
+def _parse_state(raw: str | None) -> float | None:
+    if raw is None or raw in ("unknown", "unavailable", "none", ""):
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_fahrenheit(value: float, unit: str | None) -> float:
+    if unit == UnitOfTemperature.FAHRENHEIT:
+        return value
+    if unit == UnitOfTemperature.CELSIUS or unit is None:
+        return TemperatureConverter.convert(
+            value, UnitOfTemperature.CELSIUS, UnitOfTemperature.FAHRENHEIT
+        )
+    return TemperatureConverter.convert(value, unit, UnitOfTemperature.FAHRENHEIT)
+
+
+def _build_mower_readings(
+    precip_states: list[State],
+    temp_states: list[State],
+) -> list[MowerReading]:
+    """Assemble MowerReadings using precip events as the spine.
+
+    For each precip reading we carry forward the most recent temperature
+    reading at-or-before its timestamp. Readings before the first temp sample
+    are dropped — there is no temperature to apply drying with.
+    """
+    temp_history: list[tuple[datetime, float]] = []
+    for s in temp_states:
+        value = _parse_state(s.state)
+        if value is None:
+            continue
+        unit = s.attributes.get("unit_of_measurement") if s.attributes else None
+        temp_history.append((s.last_changed, _to_fahrenheit(value, unit)))
+    temp_history.sort(key=lambda x: x[0])
+
+    readings: list[MowerReading] = []
+    temp_idx = -1
+    for s in precip_states:
+        precip = _parse_state(s.state)
+        if precip is None:
+            continue
+        ts = s.last_changed
+        while temp_idx + 1 < len(temp_history) and temp_history[temp_idx + 1][0] <= ts:
+            temp_idx += 1
+        if temp_idx < 0:
+            continue
+        readings.append(
+            MowerReading(
+                recorded_at=ts,
+                temperature_f=temp_history[temp_idx][1],
+                precip_today_mm=precip,
+            )
+        )
+    return readings
+
+
+def _to_mower_forecast(
+    points: list[ForecastPoint],
+    unit: str | None,
+) -> list[MowerForecastPoint]:
+    out: list[MowerForecastPoint] = []
+    for p in points:
+        if p.temperature is None:
+            continue
+        prob = p.precipitation_probability
+        out.append(
+            MowerForecastPoint(
+                when=p.when,
+                temperature_f=_to_fahrenheit(p.temperature, unit),
+                precip_prob=float(prob) if prob is not None else 0.0,
+            )
+        )
+    return out
+
+
 def _today_event(raw: Any, now: datetime) -> datetime | None:
     """Resolve a sun next_* attribute to today's occurrence.
 
@@ -354,11 +521,13 @@ def _compute(
 
         temp = point.get("temperature")
         condition = point.get("condition")
+        prob = point.get("precipitation_probability")
         points.append(
             ForecastPoint(
                 when=parsed,
                 temperature=temp if isinstance(temp, int | float) else None,
                 condition=condition if isinstance(condition, str) else None,
+                precipitation_probability=prob if isinstance(prob, int | float) else None,
             )
         )
 

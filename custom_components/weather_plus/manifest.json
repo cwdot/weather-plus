@@ -3,6 +3,7 @@
   "name": "Weather Plus",
   "codeowners": ["@cwdot"],
   "config_flow": true,
+  "after_dependencies": ["recorder"],
   "documentation": "https://github.com/cwdot/weather-plus",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/cwdot/weather-plus/issues",

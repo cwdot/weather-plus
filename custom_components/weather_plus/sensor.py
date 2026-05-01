@@ -88,6 +88,9 @@ async def async_setup_entry(
 
     sensors.extend(_TimestampSensor(coordinator, entry, spec) for spec in _TIMESTAMP_SPECS)
 
+    if coordinator.mower_precip_entity and coordinator.mower_temperature_entity:
+        sensors.append(_MowerPredictionSensor(coordinator, entry))
+
     async_add_entities(sensors)
 
 
@@ -167,3 +170,34 @@ class _TimestampSensor(CoordinatorEntity[WeatherPlusCoordinator], SensorEntity):
     @property
     def native_value(self) -> datetime | None:
         return self.entity_description.value_fn(self.coordinator.data)
+
+
+class _MowerPredictionSensor(CoordinatorEntity[WeatherPlusCoordinator], SensorEntity):
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_name = "Mower Ready Prediction"
+    _attr_icon = "mdi:calendar-clock"
+
+    def __init__(
+        self,
+        coordinator: WeatherPlusCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_mower_ready_prediction"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id, "mower")},
+            name=f"{coordinator.source_object_id} Mower",
+            manufacturer="Weather Plus",
+            model="Mower readiness",
+            via_device=(DOMAIN, entry.entry_id),
+        )
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.coordinator.data.mower is not None
+
+    @property
+    def native_value(self) -> datetime | None:
+        mower = self.coordinator.data.mower
+        return mower.predicted_ready_at if mower is not None else None
