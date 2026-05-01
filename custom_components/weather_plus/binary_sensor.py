@@ -59,10 +59,11 @@ class _ConditionBinarySensor(CoordinatorEntity[WeatherPlusCoordinator], BinarySe
         self._attr_name = spec.name
         self._attr_device_class = spec.device_class
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=coordinator.source_object_id,
+            identifiers={(DOMAIN, entry.entry_id, "conditions")},
+            name=f"{coordinator.source_object_id} Conditions",
             manufacturer="Weather Plus",
-            model=f"Forecast aggregates for {coordinator.weather_entity}",
+            model="Forecast conditions",
+            via_device=(DOMAIN, entry.entry_id),
         )
 
     @property
