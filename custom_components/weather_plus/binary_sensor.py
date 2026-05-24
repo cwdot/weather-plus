@@ -13,7 +13,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .conditions import CONDITION_SPECS, ConditionSpec, evaluate
+from .conditions import CONDITION_SPECS, ConditionSpec, Observed, evaluate
 from .const import (
     CONF_COLD_THRESHOLD,
     CONF_ENABLE_CONDITIONS,
@@ -76,12 +76,17 @@ class _ConditionBinarySensor(CoordinatorEntity[WeatherPlusCoordinator], BinarySe
 
     @property
     def is_on(self) -> bool:
+        data = self.coordinator.data
         return evaluate(
             self._spec,
-            self.coordinator.data.forecast_points,
+            data.forecast_points,
             dt_util.utcnow(),
             self._cold,
             self._hot,
+            observed=Observed(
+                rain_rate=data.observed_rain_rate,
+                rain_daily=data.observed_rain_daily,
+            ),
         )
 
 

@@ -24,6 +24,8 @@ from .const import (
     CONF_MOWER_PRECIP_ENTITY,
     CONF_MOWER_TEMPERATURE_ENTITY,
     CONF_NIGHTTIME_HOUR,
+    CONF_RAIN_DAILY_ENTITY,
+    CONF_RAIN_RATE_ENTITY,
     CONF_SUN_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
@@ -73,6 +75,8 @@ class ForecastStats:
     daytime_at: datetime | None = None
     nighttime_at: datetime | None = None
     mower: MowerState | None = None
+    observed_rain_rate: float | None = None
+    observed_rain_daily: float | None = None
 
 
 @dataclass
@@ -96,6 +100,8 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         self.nighttime_hour: int = data.get(CONF_NIGHTTIME_HOUR, DEFAULT_NIGHTTIME_HOUR)
         self.mower_precip_entity: str | None = data.get(CONF_MOWER_PRECIP_ENTITY) or None
         self.mower_temperature_entity: str | None = data.get(CONF_MOWER_TEMPERATURE_ENTITY) or None
+        self.rain_rate_entity: str | None = data.get(CONF_RAIN_RATE_ENTITY) or None
+        self.rain_daily_entity: str | None = data.get(CONF_RAIN_DAILY_ENTITY) or None
         interval = data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
 
         self.source_object_id = self.weather_entity.split(".", 1)[-1]
@@ -125,6 +131,8 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
             self.nighttime_hour,
         )
 
+        rain_rate, rain_daily = self._read_rain_gauge()
+
         try:
             response = await self.hass.services.async_call(
                 "weather",
@@ -140,7 +148,12 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         except Exception as err:
             base = self._fallback(err, now, m_at, d_at, n_at, next_m_at)
             mower = await self._compute_mower(now, base.forecast_points, base.temperature_unit)
-            return replace(base, mower=mower)
+            return replace(
+                base,
+                mower=mower,
+                observed_rain_rate=rain_rate,
+                observed_rain_daily=rain_daily,
+            )
 
         unit, current = self._read_source_state()
         fresh = _compute(
@@ -161,7 +174,12 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         )
         merged = self._merge_extremes(fresh, now, m_at, d_at, n_at, next_m_at, current)
         mower = await self._compute_mower(now, merged.forecast_points, merged.temperature_unit)
-        merged = replace(merged, mower=mower)
+        merged = replace(
+            merged,
+            mower=mower,
+            observed_rain_rate=rain_rate,
+            observed_rain_daily=rain_daily,
+        )
         self._last_success = now
         return merged
 
@@ -315,6 +333,20 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
             )
             return None, None, None
         return dawn, noon, dusk
+
+    def _read_rain_gauge(self) -> tuple[float | None, float | None]:
+        return (
+            self._read_numeric_state(self.rain_rate_entity),
+            self._read_numeric_state(self.rain_daily_entity),
+        )
+
+    def _read_numeric_state(self, entity_id: str | None) -> float | None:
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return None
+        return _parse_state(state.state)
 
     def _read_source_state(self) -> tuple[str | None, float | None]:
         state = self.hass.states.get(self.weather_entity)

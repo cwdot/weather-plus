@@ -13,6 +13,8 @@ CONF_COLD_THRESHOLD = "cold_threshold"
 CONF_HOT_THRESHOLD = "hot_threshold"
 CONF_MOWER_PRECIP_ENTITY = "mower_precip_entity"
 CONF_MOWER_TEMPERATURE_ENTITY = "mower_temperature_entity"
+CONF_RAIN_RATE_ENTITY = "rain_rate_entity"
+CONF_RAIN_DAILY_ENTITY = "rain_daily_entity"
 
 MODE_FIXED = "fixed"
 MODE_SUN = "sun"

@@ -20,6 +20,8 @@ from .const import (
     CONF_MOWER_PRECIP_ENTITY,
     CONF_MOWER_TEMPERATURE_ENTITY,
     CONF_NIGHTTIME_HOUR,
+    CONF_RAIN_DAILY_ENTITY,
+    CONF_RAIN_RATE_ENTITY,
     CONF_SUN_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
@@ -102,6 +104,18 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor", device_class="temperature"),
             ),
+            vol.Optional(
+                CONF_RAIN_RATE_ENTITY,
+                description={"suggested_value": defaults.get(CONF_RAIN_RATE_ENTITY)},
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor"),
+            ),
+            vol.Optional(
+                CONF_RAIN_DAILY_ENTITY,
+                description={"suggested_value": defaults.get(CONF_RAIN_DAILY_ENTITY)},
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor"),
+            ),
         }
     )
 
@@ -142,7 +156,12 @@ class WeatherPlusConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_COLD_THRESHOLD: user_input[CONF_COLD_THRESHOLD],
                     CONF_HOT_THRESHOLD: user_input[CONF_HOT_THRESHOLD],
                 }
-                for key in (CONF_MOWER_PRECIP_ENTITY, CONF_MOWER_TEMPERATURE_ENTITY):
+                for key in (
+                    CONF_MOWER_PRECIP_ENTITY,
+                    CONF_MOWER_TEMPERATURE_ENTITY,
+                    CONF_RAIN_RATE_ENTITY,
+                    CONF_RAIN_DAILY_ENTITY,
+                ):
                     if user_input.get(key):
                         options[key] = user_input[key]
                 return self.async_create_entry(

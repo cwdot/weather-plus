@@ -15,11 +15,15 @@
           "dual_unit": "Emit both Fahrenheit and Celsius sensors (adds current temperature)",
           "enable_conditions": "Emit forecast condition binary sensors",
           "cold_threshold": "Cold threshold (in source unit)",
-          "hot_threshold": "Hot threshold (in source unit)"
+          "hot_threshold": "Hot threshold (in source unit)",
+          "rain_rate_entity": "Rain rate sensor (augments hour_rainy)",
+          "rain_daily_entity": "Daily rain total sensor (augments today_rain)"
         },
         "data_description": {
           "daytime_mode": "Fixed hours use the values below; Sun mode uses dawn / noon / dusk from Home Assistant's sun entity.",
-          "enable_conditions": "Adds binary sensors like today_rain, today_cold, hour_lightning derived from the hourly forecast."
+          "enable_conditions": "Adds binary sensors like today_rain, today_cold, hour_lightning derived from the hourly forecast.",
+          "rain_rate_entity": "Optional gauge (e.g. sensor.gw1200_rainrate). Any reading > 0 forces hour_rainy on, catching drizzle the forecast misses.",
+          "rain_daily_entity": "Optional gauge (e.g. sensor.gw1200_dailyrain). Any reading > 0 forces today_rain on."
         }
       }
     },
@@ -45,7 +49,9 @@
           "dual_unit": "Emit both Fahrenheit and Celsius sensors (adds current temperature)",
           "enable_conditions": "Emit forecast condition binary sensors",
           "cold_threshold": "Cold threshold (in source unit)",
-          "hot_threshold": "Hot threshold (in source unit)"
+          "hot_threshold": "Hot threshold (in source unit)",
+          "rain_rate_entity": "Rain rate sensor (augments hour_rainy)",
+          "rain_daily_entity": "Daily rain total sensor (augments today_rain)"
         }
       }
     },

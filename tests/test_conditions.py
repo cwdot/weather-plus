@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from custom_components.weather_plus.conditions import (
     CONDITION_SPECS,
     ForecastPoint,
+    Observed,
     evaluate,
 )
 
@@ -84,6 +85,37 @@ def test_missing_temperature_does_not_match_temperature_specs():
     points = [_point(2, condition="cloudy", temp=None)]
     assert evaluate(_SPECS_BY_KEY["today_cold"], points, _NOW, 65, 80) is False
     assert evaluate(_SPECS_BY_KEY["today_hot"], points, _NOW, 65, 80) is False
+
+
+def test_today_rain_triggers_from_daily_gauge_even_without_forecast():
+    # forecast says clear, but daily rain gauge has caught drizzle
+    points = [_point(2, condition="sunny")]
+    observed = Observed(rain_daily=0.2)
+    assert evaluate(_SPECS_BY_KEY["today_rain"], points, _NOW, 65, 80, observed) is True
+
+
+def test_today_rain_ignores_zero_daily_gauge():
+    points = [_point(2, condition="sunny")]
+    observed = Observed(rain_daily=0.0)
+    assert evaluate(_SPECS_BY_KEY["today_rain"], points, _NOW, 65, 80, observed) is False
+
+
+def test_hour_rainy_triggers_from_rate_gauge():
+    points = [_point(0.5, condition="cloudy")]
+    observed = Observed(rain_rate=0.1)
+    assert evaluate(_SPECS_BY_KEY["hour_rainy"], points, _NOW, 65, 80, observed) is True
+
+
+def test_hour_rainy_forecast_still_fires_without_observed():
+    points = [_point(0.5, condition="pouring")]
+    assert evaluate(_SPECS_BY_KEY["hour_rainy"], points, _NOW, 65, 80) is True
+
+
+def test_observed_does_not_affect_unrelated_specs():
+    # severe weather isn't a rain spec — gauge readings shouldn't flip it on
+    points = [_point(2, condition="cloudy")]
+    observed = Observed(rain_rate=5.0, rain_daily=10.0)
+    assert evaluate(_SPECS_BY_KEY["today_severe"], points, _NOW, 65, 80, observed) is False
 
 
 def test_all_specs_have_unique_keys_and_device_class():

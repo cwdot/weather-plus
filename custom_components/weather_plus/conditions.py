@@ -53,6 +53,14 @@ _PredicateFactory = Callable[[float, float], Callable[[ForecastPoint], bool]]
 
 
 @dataclass(frozen=True)
+class Observed:
+    """Live sensor readings that can short-circuit a forecast condition."""
+
+    rain_rate: float | None = None
+    rain_daily: float | None = None
+
+
+@dataclass(frozen=True)
 class ConditionSpec:
     key: str
     name: str
@@ -60,6 +68,7 @@ class ConditionSpec:
     device_class: BinarySensorDeviceClass | None
     window: timedelta
     predicate_factory: _PredicateFactory
+    observed_match: Callable[[Observed], bool] | None = None
 
 
 def _condition_match(values: frozenset[str]) -> _PredicateFactory:
@@ -90,6 +99,14 @@ def _temp_factory(below: bool) -> _PredicateFactory:
     return _temp_below if below else _temp_above
 
 
+def _gauge_positive(get: Callable[[Observed], float | None]) -> Callable[[Observed], bool]:
+    def check(observed: Observed) -> bool:
+        value = get(observed)
+        return value is not None and value > 0
+
+    return check
+
+
 CONDITION_SPECS: tuple[ConditionSpec, ...] = (
     ConditionSpec(
         key="today_rain",
@@ -98,6 +115,7 @@ CONDITION_SPECS: tuple[ConditionSpec, ...] = (
         device_class=BinarySensorDeviceClass.MOISTURE,
         window=_DAY_WINDOW,
         predicate_factory=_condition_match(_RAINS),
+        observed_match=_gauge_positive(lambda o: o.rain_daily),
     ),
     ConditionSpec(
         key="today_severe",
@@ -178,6 +196,7 @@ CONDITION_SPECS: tuple[ConditionSpec, ...] = (
         device_class=BinarySensorDeviceClass.MOISTURE,
         window=_HOUR_WINDOW,
         predicate_factory=_condition_match(_RAINY),
+        observed_match=_gauge_positive(lambda o: o.rain_rate),
     ),
     ConditionSpec(
         key="hour_snowy",
@@ -220,8 +239,16 @@ def evaluate(
     now: datetime,
     cold_threshold: float,
     hot_threshold: float,
+    observed: Observed | None = None,
 ) -> bool:
-    """Return True if any point in [now, now + spec.window) matches the spec."""
+    """Return True if any point in [now, now + spec.window) matches the spec.
+
+    If ``observed`` is supplied and the spec defines an ``observed_match``,
+    a positive live reading short-circuits to True regardless of the forecast.
+    This is how a physical rain gauge augments forecast-only conditions.
+    """
+    if spec.observed_match is not None and observed is not None and spec.observed_match(observed):
+        return True
     end = now + spec.window
     predicate = spec.predicate_factory(cold_threshold, hot_threshold)
     for point in points:
