@@ -10,24 +10,30 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.weather_plus.const import (
+    CONF_ACTIVITY_NAME,
     CONF_COLD_THRESHOLD,
     CONF_DAYTIME_HOUR,
     CONF_DAYTIME_MODE,
     CONF_DUAL_UNIT,
     CONF_ENABLE_CONDITIONS,
+    CONF_END_HOUR,
     CONF_HOT_THRESHOLD,
+    CONF_IDEAL_TEMPERATURE,
     CONF_MORNINGTIME_HOUR,
     CONF_NIGHTTIME_HOUR,
+    CONF_START_HOUR,
     CONF_SUN_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
     DEFAULT_COLD_THRESHOLD,
     DEFAULT_ENABLE_CONDITIONS,
     DEFAULT_HOT_THRESHOLD,
+    DEFAULT_IDEAL_TEMPERATURE,
     DEFAULT_SUN_ENTITY,
     DOMAIN,
     MODE_FIXED,
     MODE_SUN,
+    SUBENTRY_TYPE_ACTIVITY,
 )
 
 _VALID = {
@@ -66,6 +72,7 @@ async def test_user_flow_creates_entry(hass: HomeAssistant) -> None:
         CONF_ENABLE_CONDITIONS: DEFAULT_ENABLE_CONDITIONS,
         CONF_COLD_THRESHOLD: DEFAULT_COLD_THRESHOLD,
         CONF_HOT_THRESHOLD: DEFAULT_HOT_THRESHOLD,
+        CONF_IDEAL_TEMPERATURE: DEFAULT_IDEAL_TEMPERATURE,
     }
 
 
@@ -145,6 +152,66 @@ async def test_options_flow_rejects_unordered_hours(hass: HomeAssistant) -> None
     )
     assert result2["type"] == FlowResultType.FORM
     assert result2["errors"] == {"base": "invalid_window"}
+
+
+def _entry_with_subentries(hass: HomeAssistant) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="weather.home",
+        data={CONF_WEATHER_ENTITY: "weather.home"},
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_activity_subentry_creates(hass: HomeAssistant) -> None:
+    entry = _entry_with_subentries(hass)
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, SUBENTRY_TYPE_ACTIVITY),
+        context={"source": config_entries.SOURCE_USER},
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "user"
+
+    result2 = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {CONF_ACTIVITY_NAME: "Morning walk", CONF_START_HOUR: 6, CONF_END_HOUR: 9},
+    )
+    assert result2["type"] == FlowResultType.CREATE_ENTRY
+    assert result2["title"] == "Morning walk"
+    assert result2["data"] == {
+        CONF_ACTIVITY_NAME: "Morning walk",
+        CONF_START_HOUR: 6,
+        CONF_END_HOUR: 9,
+    }
+
+
+async def test_activity_subentry_rejects_unordered_window(hass: HomeAssistant) -> None:
+    entry = _entry_with_subentries(hass)
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, SUBENTRY_TYPE_ACTIVITY),
+        context={"source": config_entries.SOURCE_USER},
+    )
+    result2 = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {CONF_ACTIVITY_NAME: "Bad", CONF_START_HOUR: 18, CONF_END_HOUR: 9},
+    )
+    assert result2["type"] == FlowResultType.FORM
+    assert result2["errors"] == {"base": "invalid_activity_window"}
+
+
+async def test_activity_subentry_rejects_empty_name(hass: HomeAssistant) -> None:
+    entry = _entry_with_subentries(hass)
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, SUBENTRY_TYPE_ACTIVITY),
+        context={"source": config_entries.SOURCE_USER},
+    )
+    result2 = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {CONF_ACTIVITY_NAME: "   ", CONF_START_HOUR: 6, CONF_END_HOUR: 9},
+    )
+    assert result2["type"] == FlowResultType.FORM
+    assert result2["errors"] == {"base": "invalid_name"}
 
 
 async def test_sun_mode_ignores_hour_order(hass: HomeAssistant) -> None:

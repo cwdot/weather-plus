@@ -15,6 +15,12 @@ CONF_MOWER_PRECIP_ENTITY = "mower_precip_entity"
 CONF_MOWER_TEMPERATURE_ENTITY = "mower_temperature_entity"
 CONF_RAIN_RATE_ENTITY = "rain_rate_entity"
 CONF_RAIN_DAILY_ENTITY = "rain_daily_entity"
+CONF_IDEAL_TEMPERATURE = "ideal_temperature"
+
+SUBENTRY_TYPE_ACTIVITY = "activity"
+CONF_ACTIVITY_NAME = "name"
+CONF_START_HOUR = "start_hour"
+CONF_END_HOUR = "end_hour"
 
 MODE_FIXED = "fixed"
 MODE_SUN = "sun"
@@ -30,3 +36,4 @@ DEFAULT_DUAL_UNIT = False
 DEFAULT_ENABLE_CONDITIONS = False
 DEFAULT_COLD_THRESHOLD = 65
 DEFAULT_HOT_THRESHOLD = 80
+DEFAULT_IDEAL_TEMPERATURE = 72

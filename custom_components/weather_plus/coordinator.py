@@ -20,23 +20,28 @@ from .conditions import ForecastPoint
 from .const import (
     CONF_DAYTIME_HOUR,
     CONF_DAYTIME_MODE,
+    CONF_END_HOUR,
+    CONF_IDEAL_TEMPERATURE,
     CONF_MORNINGTIME_HOUR,
     CONF_MOWER_PRECIP_ENTITY,
     CONF_MOWER_TEMPERATURE_ENTITY,
     CONF_NIGHTTIME_HOUR,
     CONF_RAIN_DAILY_ENTITY,
     CONF_RAIN_RATE_ENTITY,
+    CONF_START_HOUR,
     CONF_SUN_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
     DEFAULT_DAYTIME_HOUR,
     DEFAULT_DAYTIME_MODE,
+    DEFAULT_IDEAL_TEMPERATURE,
     DEFAULT_MORNINGTIME_HOUR,
     DEFAULT_NIGHTTIME_HOUR,
     DEFAULT_SUN_ENTITY,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     MODE_SUN,
+    SUBENTRY_TYPE_ACTIVITY,
 )
 from .mower import (
     DEFAULT_DRYING_RATES,
@@ -61,6 +66,15 @@ class MowerState:
     predicted_ready_at: datetime | None
 
 
+@dataclass(frozen=True)
+class ActivityResult:
+    """The hour within an activity's window that is closest to the ideal temperature."""
+
+    best_at: datetime | None
+    best_temperature: float | None
+    delta_from_ideal: float | None
+
+
 @dataclass
 class ForecastStats:
     todays_high: float | None
@@ -77,6 +91,8 @@ class ForecastStats:
     mower: MowerState | None = None
     observed_rain_rate: float | None = None
     observed_rain_daily: float | None = None
+    ideal_temperature: float | None = None
+    activities: dict[str, ActivityResult] = field(default_factory=dict)
 
 
 @dataclass
@@ -91,8 +107,10 @@ class _CycleExtremes:
 
 class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self.entry = entry
         data = {**entry.data, **entry.options}
         self.weather_entity: str = data[CONF_WEATHER_ENTITY]
+        self.ideal_temperature: float = data.get(CONF_IDEAL_TEMPERATURE, DEFAULT_IDEAL_TEMPERATURE)
         self.daytime_mode: str = data.get(CONF_DAYTIME_MODE, DEFAULT_DAYTIME_MODE)
         self.sun_entity: str = data.get(CONF_SUN_ENTITY, DEFAULT_SUN_ENTITY)
         self.morningtime_hour: int = data.get(CONF_MORNINGTIME_HOUR, DEFAULT_MORNINGTIME_HOUR)
@@ -153,6 +171,8 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
                 mower=mower,
                 observed_rain_rate=rain_rate,
                 observed_rain_daily=rain_daily,
+                ideal_temperature=self.ideal_temperature,
+                activities=self._compute_activities(base.forecast_points, now),
             )
 
         unit, current = self._read_source_state()
@@ -179,6 +199,8 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
             mower=mower,
             observed_rain_rate=rain_rate,
             observed_rain_daily=rain_daily,
+            ideal_temperature=self.ideal_temperature,
+            activities=self._compute_activities(merged.forecast_points, now),
         )
         self._last_success = now
         return merged
@@ -227,6 +249,26 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
             is_wet=is_wet,
             predicted_ready_at=predicted_ready,
         )
+
+    def _compute_activities(
+        self,
+        forecast_points: list[ForecastPoint],
+        now: datetime,
+    ) -> dict[str, ActivityResult]:
+        """Find each activity's closest-to-ideal hour within its daily clock window."""
+        results: dict[str, ActivityResult] = {}
+        for subentry_id, subentry in self.entry.subentries.items():
+            if subentry.subentry_type != SUBENTRY_TYPE_ACTIVITY:
+                continue
+            data = subentry.data
+            results[subentry_id] = _best_time(
+                forecast_points,
+                self.ideal_temperature,
+                data[CONF_START_HOUR],
+                data[CONF_END_HOUR],
+                now,
+            )
+        return results
 
     def _fallback(
         self,
@@ -512,6 +554,40 @@ def _classify(
     if point < n:
         return 1
     return 2
+
+
+def _best_time(
+    points: list[ForecastPoint],
+    ideal: float,
+    start_hour: int,
+    end_hour: int,
+    now: datetime,
+) -> ActivityResult:
+    """Pick the upcoming hour closest to `ideal` within a daily [start, end) clock window.
+
+    Only points at-or-after `now` are considered (you cannot go outside in the
+    past). If today's window has already passed, the search rolls forward to the
+    next day that has a qualifying forecast hour. Ties on temperature distance
+    resolve to the earliest hour.
+    """
+    candidates: list[ForecastPoint] = []
+    for p in points:
+        if p.temperature is None or p.when < now:
+            continue
+        if start_hour <= dt_util.as_local(p.when).hour < end_hour:
+            candidates.append(p)
+
+    if not candidates:
+        return ActivityResult(best_at=None, best_temperature=None, delta_from_ideal=None)
+
+    earliest_date = min(dt_util.as_local(p.when).date() for p in candidates)
+    same_day = [p for p in candidates if dt_util.as_local(p.when).date() == earliest_date]
+    best = min(same_day, key=lambda p: (abs(p.temperature - ideal), p.when))
+    return ActivityResult(
+        best_at=best.when,
+        best_temperature=best.temperature,
+        delta_from_ideal=abs(best.temperature - ideal),
+    )
 
 
 def _max(a: float | None, b: float | None) -> float | None:

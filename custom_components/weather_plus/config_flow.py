@@ -5,23 +5,33 @@ from __future__ import annotations
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigSubentryFlow,
+    OptionsFlow,
+    SubentryFlowResult,
+)
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_ACTIVITY_NAME,
     CONF_COLD_THRESHOLD,
     CONF_DAYTIME_HOUR,
     CONF_DAYTIME_MODE,
     CONF_DUAL_UNIT,
     CONF_ENABLE_CONDITIONS,
+    CONF_END_HOUR,
     CONF_HOT_THRESHOLD,
+    CONF_IDEAL_TEMPERATURE,
     CONF_MORNINGTIME_HOUR,
     CONF_MOWER_PRECIP_ENTITY,
     CONF_MOWER_TEMPERATURE_ENTITY,
     CONF_NIGHTTIME_HOUR,
     CONF_RAIN_DAILY_ENTITY,
     CONF_RAIN_RATE_ENTITY,
+    CONF_START_HOUR,
     CONF_SUN_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
@@ -32,12 +42,14 @@ from .const import (
     DEFAULT_DUAL_UNIT,
     DEFAULT_ENABLE_CONDITIONS,
     DEFAULT_HOT_THRESHOLD,
+    DEFAULT_IDEAL_TEMPERATURE,
     DEFAULT_MORNINGTIME_HOUR,
     DEFAULT_NIGHTTIME_HOUR,
     DEFAULT_SUN_ENTITY,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     MODE_FIXED,
+    SUBENTRY_TYPE_ACTIVITY,
 )
 
 _MODE_SELECTOR = selector.SelectSelector(
@@ -91,6 +103,10 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
             vol.Required(
                 CONF_HOT_THRESHOLD,
                 default=defaults.get(CONF_HOT_THRESHOLD, DEFAULT_HOT_THRESHOLD),
+            ): vol.Coerce(float),
+            vol.Required(
+                CONF_IDEAL_TEMPERATURE,
+                default=defaults.get(CONF_IDEAL_TEMPERATURE, DEFAULT_IDEAL_TEMPERATURE),
             ): vol.Coerce(float),
             vol.Optional(
                 CONF_MOWER_PRECIP_ENTITY,
@@ -155,6 +171,7 @@ class WeatherPlusConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_ENABLE_CONDITIONS: user_input[CONF_ENABLE_CONDITIONS],
                     CONF_COLD_THRESHOLD: user_input[CONF_COLD_THRESHOLD],
                     CONF_HOT_THRESHOLD: user_input[CONF_HOT_THRESHOLD],
+                    CONF_IDEAL_TEMPERATURE: user_input[CONF_IDEAL_TEMPERATURE],
                 }
                 for key in (
                     CONF_MOWER_PRECIP_ENTITY,
@@ -184,6 +201,84 @@ class WeatherPlusConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(entry: ConfigEntry) -> OptionsFlow:
         return WeatherPlusOptionsFlow(entry)
+
+    @classmethod
+    @callback
+    def async_get_supported_subentry_types(
+        cls, config_entry: ConfigEntry
+    ) -> dict[str, type[ConfigSubentryFlow]]:
+        return {SUBENTRY_TYPE_ACTIVITY: ActivitySubentryFlow}
+
+
+def _activity_schema(defaults: dict[str, Any]) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_ACTIVITY_NAME,
+                default=defaults.get(CONF_ACTIVITY_NAME, ""),
+            ): str,
+            vol.Required(
+                CONF_START_HOUR,
+                default=defaults.get(CONF_START_HOUR, 6),
+            ): vol.All(int, vol.Range(min=0, max=23)),
+            vol.Required(
+                CONF_END_HOUR,
+                default=defaults.get(CONF_END_HOUR, 9),
+            ): vol.All(int, vol.Range(min=1, max=24)),
+        }
+    )
+
+
+def _validate_activity(user_input: dict[str, Any]) -> str | None:
+    if not user_input[CONF_ACTIVITY_NAME].strip():
+        return "invalid_name"
+    if user_input[CONF_START_HOUR] >= user_input[CONF_END_HOUR]:
+        return "invalid_activity_window"
+    return None
+
+
+class ActivitySubentryFlow(ConfigSubentryFlow):
+    """Add or edit a 'best time to go outside' activity."""
+
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+        return await self._async_step_form(user_input)
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        return await self._async_step_form(user_input)
+
+    async def _async_step_form(self, user_input: dict[str, Any] | None) -> SubentryFlowResult:
+        reconfiguring = self.source == "reconfigure"
+        defaults = dict(self._get_reconfigure_subentry().data) if reconfiguring else {}
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            err = _validate_activity(user_input)
+            if err:
+                errors["base"] = err
+            else:
+                data = {
+                    CONF_ACTIVITY_NAME: user_input[CONF_ACTIVITY_NAME].strip(),
+                    CONF_START_HOUR: user_input[CONF_START_HOUR],
+                    CONF_END_HOUR: user_input[CONF_END_HOUR],
+                }
+                title = data[CONF_ACTIVITY_NAME]
+                if reconfiguring:
+                    return self.async_update_and_abort(
+                        self._get_entry(),
+                        self._get_reconfigure_subentry(),
+                        title=title,
+                        data=data,
+                    )
+                return self.async_create_entry(title=title, data=data)
+            defaults = user_input
+
+        return self.async_show_form(
+            step_id="reconfigure" if reconfiguring else "user",
+            data_schema=_activity_schema(defaults),
+            errors=errors,
+        )
 
 
 class WeatherPlusOptionsFlow(OptionsFlow):

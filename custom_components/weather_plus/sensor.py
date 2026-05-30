@@ -20,8 +20,14 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util.unit_conversion import TemperatureConverter
 
-from .const import CONF_DUAL_UNIT, DEFAULT_DUAL_UNIT, DOMAIN
-from .coordinator import ForecastStats, WeatherPlusCoordinator
+from .const import (
+    CONF_ACTIVITY_NAME,
+    CONF_DUAL_UNIT,
+    DEFAULT_DUAL_UNIT,
+    DOMAIN,
+    SUBENTRY_TYPE_ACTIVITY,
+)
+from .coordinator import ActivityResult, ForecastStats, WeatherPlusCoordinator
 
 _DUAL_UNITS: tuple[str, ...] = (UnitOfTemperature.FAHRENHEIT, UnitOfTemperature.CELSIUS)
 _UNIT_SUFFIX: dict[str, str] = {
@@ -92,6 +98,18 @@ async def async_setup_entry(
         sensors.append(_MowerPredictionSensor(coordinator, entry))
 
     async_add_entities(sensors)
+
+    for subentry_id, subentry in entry.subentries.items():
+        if subentry.subentry_type != SUBENTRY_TYPE_ACTIVITY:
+            continue
+        name = subentry.data[CONF_ACTIVITY_NAME]
+        async_add_entities(
+            [
+                _ActivityBestTimeSensor(coordinator, entry, subentry_id, name),
+                _ActivityBestTempSensor(coordinator, entry, subentry_id, name),
+            ],
+            config_subentry_id=subentry_id,
+        )
 
 
 class _ForecastSensor(CoordinatorEntity[WeatherPlusCoordinator], SensorEntity):
@@ -201,3 +219,86 @@ class _MowerPredictionSensor(CoordinatorEntity[WeatherPlusCoordinator], SensorEn
     def native_value(self) -> datetime | None:
         mower = self.coordinator.data.mower
         return mower.predicted_ready_at if mower is not None else None
+
+
+class _ActivitySensorBase(CoordinatorEntity[WeatherPlusCoordinator], SensorEntity):
+    """Shared device wiring for an activity's best-time sensors."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: WeatherPlusCoordinator,
+        entry: ConfigEntry,
+        subentry_id: str,
+        activity_name: str,
+        key: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._subentry_id = subentry_id
+        self._attr_unique_id = f"{subentry_id}_{key}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, subentry_id)},
+            name=activity_name,
+            manufacturer="Weather Plus",
+            model="Activity best time",
+            via_device=(DOMAIN, entry.entry_id),
+        )
+
+    @property
+    def _result(self) -> ActivityResult | None:
+        return self.coordinator.data.activities.get(self._subentry_id)
+
+
+class _ActivityBestTimeSensor(_ActivitySensorBase):
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_name = "Best Time"
+    _attr_icon = "mdi:clock-check-outline"
+
+    def __init__(
+        self,
+        coordinator: WeatherPlusCoordinator,
+        entry: ConfigEntry,
+        subentry_id: str,
+        activity_name: str,
+    ) -> None:
+        super().__init__(coordinator, entry, subentry_id, activity_name, "best_time")
+
+    @property
+    def native_value(self) -> datetime | None:
+        result = self._result
+        return result.best_at if result is not None else None
+
+
+class _ActivityBestTempSensor(_ActivitySensorBase):
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_name = "Best Temperature"
+
+    def __init__(
+        self,
+        coordinator: WeatherPlusCoordinator,
+        entry: ConfigEntry,
+        subentry_id: str,
+        activity_name: str,
+    ) -> None:
+        super().__init__(coordinator, entry, subentry_id, activity_name, "best_temperature")
+
+    @property
+    def native_value(self) -> float | None:
+        result = self._result
+        return result.best_temperature if result is not None else None
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        return self.coordinator.data.temperature_unit
+
+    @property
+    def extra_state_attributes(self) -> dict[str, float] | None:
+        result = self._result
+        if result is None or result.delta_from_ideal is None:
+            return None
+        attrs: dict[str, float] = {"delta_from_ideal": round(result.delta_from_ideal, 2)}
+        if self.coordinator.data.ideal_temperature is not None:
+            attrs["ideal_temperature"] = self.coordinator.data.ideal_temperature
+        return attrs
