@@ -95,7 +95,7 @@ class _MowerBinarySensor(CoordinatorEntity[WeatherPlusCoordinator], BinarySensor
 
     _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.MOISTURE
-    _attr_name = "Mower"
+    _attr_name = "Wet"
 
     def __init__(
         self,

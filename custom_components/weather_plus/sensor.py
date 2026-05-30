@@ -175,7 +175,7 @@ class _TimestampSensor(CoordinatorEntity[WeatherPlusCoordinator], SensorEntity):
 class _MowerPredictionSensor(CoordinatorEntity[WeatherPlusCoordinator], SensorEntity):
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.TIMESTAMP
-    _attr_name = "Mower Ready Prediction"
+    _attr_name = "Ready Prediction"
     _attr_icon = "mdi:calendar-clock"
 
     def __init__(
