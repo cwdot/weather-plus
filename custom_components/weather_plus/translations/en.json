@@ -17,6 +17,8 @@
           "cold_threshold": "Cold threshold (in source unit)",
           "hot_threshold": "Hot threshold (in source unit)",
           "ideal_temperature": "Ideal temperature (in source unit)",
+          "mower_precip_entity": "Mower precipitation sensor (rainfall history)",
+          "mower_temperature_entity": "Mower temperature sensor",
           "rain_rate_entity": "Rain rate sensor (augments hour_rainy)",
           "rain_daily_entity": "Daily rain total sensor (augments today_rain)"
         },
@@ -52,6 +54,8 @@
           "cold_threshold": "Cold threshold (in source unit)",
           "hot_threshold": "Hot threshold (in source unit)",
           "ideal_temperature": "Ideal temperature (in source unit)",
+          "mower_precip_entity": "Mower precipitation sensor (rainfall history)",
+          "mower_temperature_entity": "Mower temperature sensor",
           "rain_rate_entity": "Rain rate sensor (augments hour_rainy)",
           "rain_daily_entity": "Daily rain total sensor (augments today_rain)"
         }
