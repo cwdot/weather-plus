@@ -7,13 +7,14 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers import device_registry
 
 from .const import DOMAIN
 from .coordinator import WeatherPlusCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.NUMBER, Platform.SENSOR]
 
 SERVICE_RESET_EXTREMES = "reset_extremes"
 
@@ -23,6 +24,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+
+    # Registered up front because activity/mower devices reference it as their
+    # via_device, and platforms are set up concurrently — whichever runs first
+    # would otherwise point at a device that does not exist yet.
+    device_registry.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=coordinator.source_object_id,
+        manufacturer="Weather Plus",
+        model=f"Forecast aggregates for {coordinator.weather_entity}",
+    )
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 

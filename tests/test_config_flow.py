@@ -19,17 +19,27 @@ from custom_components.weather_plus.const import (
     CONF_END_HOUR,
     CONF_HOT_THRESHOLD,
     CONF_IDEAL_TEMPERATURE,
+    CONF_MAX_ELEVATION,
+    CONF_MAX_TEMPERATURE,
+    CONF_MIN_TEMPERATURE,
     CONF_MORNINGTIME_HOUR,
     CONF_NIGHTTIME_HOUR,
     CONF_START_HOUR,
     CONF_SUN_ENTITY,
     CONF_UPDATE_INTERVAL,
+    CONF_USE_ELEVATION,
+    CONF_USE_TEMPERATURE,
     CONF_WEATHER_ENTITY,
     DEFAULT_COLD_THRESHOLD,
     DEFAULT_ENABLE_CONDITIONS,
     DEFAULT_HOT_THRESHOLD,
     DEFAULT_IDEAL_TEMPERATURE,
+    DEFAULT_MAX_ELEVATION,
+    DEFAULT_MAX_TEMPERATURE,
+    DEFAULT_MIN_TEMPERATURE,
     DEFAULT_SUN_ENTITY,
+    DEFAULT_USE_ELEVATION,
+    DEFAULT_USE_TEMPERATURE,
     DOMAIN,
     MODE_FIXED,
     MODE_SUN,
@@ -183,7 +193,60 @@ async def test_activity_subentry_creates(hass: HomeAssistant) -> None:
         CONF_ACTIVITY_NAME: "Morning walk",
         CONF_START_HOUR: 6,
         CONF_END_HOUR: 9,
+        CONF_USE_TEMPERATURE: DEFAULT_USE_TEMPERATURE,
+        CONF_MIN_TEMPERATURE: DEFAULT_MIN_TEMPERATURE,
+        CONF_MAX_TEMPERATURE: DEFAULT_MAX_TEMPERATURE,
+        CONF_USE_ELEVATION: DEFAULT_USE_ELEVATION,
+        CONF_MAX_ELEVATION: DEFAULT_MAX_ELEVATION,
     }
+
+
+async def test_activity_subentry_accepts_custom_passes(hass: HomeAssistant) -> None:
+    entry = _entry_with_subentries(hass)
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, SUBENTRY_TYPE_ACTIVITY),
+        context={"source": config_entries.SOURCE_USER},
+    )
+    result2 = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {
+            CONF_ACTIVITY_NAME: "Evening walk",
+            CONF_START_HOUR: 17,
+            CONF_END_HOUR: 20,
+            CONF_USE_TEMPERATURE: True,
+            CONF_MIN_TEMPERATURE: 55,
+            CONF_MAX_TEMPERATURE: 72,
+            CONF_USE_ELEVATION: True,
+            CONF_MAX_ELEVATION: 10,
+        },
+    )
+    assert result2["type"] == FlowResultType.CREATE_ENTRY
+    assert result2["data"][CONF_MAX_ELEVATION] == 10
+    assert result2["data"][CONF_MIN_TEMPERATURE] == 55
+    assert result2["data"][CONF_MAX_TEMPERATURE] == 72
+
+
+async def test_activity_subentry_rejects_inverted_temperature_range(hass: HomeAssistant) -> None:
+    entry = _entry_with_subentries(hass)
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, SUBENTRY_TYPE_ACTIVITY),
+        context={"source": config_entries.SOURCE_USER},
+    )
+    result2 = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {
+            CONF_ACTIVITY_NAME: "Bad",
+            CONF_START_HOUR: 6,
+            CONF_END_HOUR: 9,
+            CONF_USE_TEMPERATURE: True,
+            CONF_MIN_TEMPERATURE: 80,
+            CONF_MAX_TEMPERATURE: 60,
+            CONF_USE_ELEVATION: True,
+            CONF_MAX_ELEVATION: 15,
+        },
+    )
+    assert result2["type"] == FlowResultType.FORM
+    assert result2["errors"] == {"base": "invalid_temperature_range"}
 
 
 async def test_activity_subentry_rejects_unordered_window(hass: HomeAssistant) -> None:

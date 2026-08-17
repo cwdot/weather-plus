@@ -37,3 +37,65 @@ entity, classifies each forecast point into the morningtime / daytime / nighttim
 current cycle, and computes min/max temperatures for each. The cycle starts at the most
 recent passed morningtime — so the nighttime window naturally spans midnight into the next
 calendar day. Sensors inherit the source entity's `temperature_unit`.
+
+## Activities (best time to go outside)
+
+Each activity is a subentry (Settings → Weather Plus → Add activity) and emits
+`sensor.<activity>_best_time` and `sensor.<activity>_best_temperature`. Morning and evening
+walks are separate activities with independent settings.
+
+The search runs as staged passes, each of which **rolls back** rather than returning nothing —
+a walk with imperfect light beats no walk at all:
+
+1. **Time** (always) — bounds the search to the daily `[start hour, end hour)` window, at or
+   after now, on the earliest day that still has forecast coverage. The hourly forecast is
+   linearly interpolated onto a 10-minute grid, so answers land on times like `7:30`.
+2. **Temperature** (optional) — keeps only moments whose temperature stays inside
+   `[min, max]`. Rolled back if nothing qualifies.
+3. **Elevation** (optional) — keeps only moments whose sun elevation stays at or below the cap
+   (default `15°`), computed from your Home Assistant latitude/longitude via `astral`. Rolled
+   back to the temperature pass's survivors if nothing qualifies.
+
+The winner is the surviving moment closest to the configured **ideal temperature**, ties going
+to the earliest. Every pass tests a **20-minute buffer** (`t`, `t+10`, `t+20`), not just the
+starting instant — a walk that begins under the caps should not run into a hotter or higher sun
+partway through.
+
+`sensor.<activity>_best_time` carries `sun_elevation` and `rolled_back` attributes, so a
+compromised answer is distinguishable from one that satisfied every constraint.
+
+### Retuning thresholds at runtime
+
+The range that suits a walk in January is not the one that suits July, so each activity also
+emits `number` entities. Changing one takes effect immediately, survives restarts, and does not
+require editing the subentry — so an automation can retune the season:
+
+- `number.<activity>_minimum_temperature`
+- `number.<activity>_maximum_temperature`
+- `number.<activity>_maximum_sun_elevation`
+
+```yaml
+automation:
+  - alias: Summer walk range
+    triggers:
+      - trigger: calendar  # or any seasonal trigger you prefer
+    actions:
+      - action: number.set_value
+        target:
+          entity_id: number.morning_walk_maximum_temperature
+        data:
+          value: 68
+```
+
+The subentry values are the starting point; a number set here overrides it. Because the
+temperature numbers carry `device_class: temperature`, Home Assistant renders and accepts them
+in your configured unit system, converting to the weather entity's unit internally.
+
+| Activity field | Default | Notes |
+|----------------|---------|-------|
+| Start hour | `6` | Local-time hour, inclusive |
+| End hour | `9` | Local-time hour, exclusive |
+| Focus on temperature | `true` | Enables pass 2 |
+| Minimum / maximum temperature | `60` / `75` | In the source entity's unit |
+| Focus on sun elevation | `true` | Enables pass 3 |
+| Maximum sun elevation | `15` | Degrees above the horizon; lower means softer light |

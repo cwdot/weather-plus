@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -268,6 +269,21 @@ class _ActivityBestTimeSensor(_ActivitySensorBase):
     def native_value(self) -> datetime | None:
         result = self._result
         return result.best_at if result is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Surface the sun elevation and which passes had to be rolled back.
+
+        Without `rolled_back` a compromised answer is indistinguishable from one
+        that satisfied every constraint.
+        """
+        result = self._result
+        if result is None or result.best_at is None:
+            return None
+        attrs: dict[str, Any] = {"rolled_back": list(result.rolled_back)}
+        if result.best_elevation is not None:
+            attrs["sun_elevation"] = round(result.best_elevation, 2)
+        return attrs
 
 
 class _ActivityBestTempSensor(_ActivitySensorBase):

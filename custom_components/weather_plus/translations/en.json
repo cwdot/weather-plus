@@ -77,11 +77,21 @@
       "step": {
         "user": {
           "title": "Add activity",
-          "description": "Find the upcoming hour closest to your ideal temperature within a daily time window (e.g. morning walk = 6 to 9).",
+          "description": "Staged search for the best moment to go outside. Pass 1 bounds the search to the daily time window (e.g. morning walk = 6 to 9). Pass 2 keeps moments inside the temperature range. Pass 3 keeps moments at or below the sun elevation cap. Each pass rolls back if it would leave nothing, and the winner is the moment closest to the ideal temperature.",
           "data": {
             "name": "Name",
             "start_hour": "Start hour (0-23)",
-            "end_hour": "End hour (1-24, exclusive)"
+            "end_hour": "End hour (1-24, exclusive)",
+            "use_temperature": "Focus on temperature",
+            "min_temperature": "Minimum temperature (in source unit)",
+            "max_temperature": "Maximum temperature (in source unit)",
+            "use_elevation": "Focus on sun elevation",
+            "max_elevation": "Maximum sun elevation (degrees)"
+          },
+          "data_description": {
+            "use_temperature": "Keep only moments whose temperature stays within the range below for the next 20 minutes. Rolled back if nothing qualifies.",
+            "use_elevation": "Keep only moments whose sun elevation stays at or below the cap for the next 20 minutes. Rolled back to the temperature pass if nothing qualifies.",
+            "max_elevation": "Degrees above the horizon. Lower means softer light: 15 keeps a walk in the low morning or late evening sun."
           }
         },
         "reconfigure": {
@@ -89,13 +99,24 @@
           "data": {
             "name": "Name",
             "start_hour": "Start hour (0-23)",
-            "end_hour": "End hour (1-24, exclusive)"
+            "end_hour": "End hour (1-24, exclusive)",
+            "use_temperature": "Focus on temperature",
+            "min_temperature": "Minimum temperature (in source unit)",
+            "max_temperature": "Maximum temperature (in source unit)",
+            "use_elevation": "Focus on sun elevation",
+            "max_elevation": "Maximum sun elevation (degrees)"
+          },
+          "data_description": {
+            "use_temperature": "Keep only moments whose temperature stays within the range below for the next 20 minutes. Rolled back if nothing qualifies.",
+            "use_elevation": "Keep only moments whose sun elevation stays at or below the cap for the next 20 minutes. Rolled back to the temperature pass if nothing qualifies.",
+            "max_elevation": "Degrees above the horizon. Lower means softer light: 15 keeps a walk in the low morning or late evening sun."
           }
         }
       },
       "error": {
         "invalid_name": "Name cannot be empty.",
-        "invalid_activity_window": "Start hour must be earlier than end hour."
+        "invalid_activity_window": "Start hour must be earlier than end hour.",
+        "invalid_temperature_range": "Minimum temperature must not be greater than maximum temperature."
       }
     }
   },

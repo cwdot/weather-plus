@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import logging
+from bisect import bisect_left
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from typing import Any
 
+from astral.sun import elevation
 from homeassistant.components.recorder import get_instance as recorder_get_instance
 from homeassistant.components.recorder.history import state_changes_during_period
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant, State
+from homeassistant.helpers.sun import get_astral_location
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_conversion import TemperatureConverter
@@ -22,6 +26,9 @@ from .const import (
     CONF_DAYTIME_MODE,
     CONF_END_HOUR,
     CONF_IDEAL_TEMPERATURE,
+    CONF_MAX_ELEVATION,
+    CONF_MAX_TEMPERATURE,
+    CONF_MIN_TEMPERATURE,
     CONF_MORNINGTIME_HOUR,
     CONF_MOWER_PRECIP_ENTITY,
     CONF_MOWER_TEMPERATURE_ENTITY,
@@ -31,14 +38,21 @@ from .const import (
     CONF_START_HOUR,
     CONF_SUN_ENTITY,
     CONF_UPDATE_INTERVAL,
+    CONF_USE_ELEVATION,
+    CONF_USE_TEMPERATURE,
     CONF_WEATHER_ENTITY,
     DEFAULT_DAYTIME_HOUR,
     DEFAULT_DAYTIME_MODE,
     DEFAULT_IDEAL_TEMPERATURE,
+    DEFAULT_MAX_ELEVATION,
+    DEFAULT_MAX_TEMPERATURE,
+    DEFAULT_MIN_TEMPERATURE,
     DEFAULT_MORNINGTIME_HOUR,
     DEFAULT_NIGHTTIME_HOUR,
     DEFAULT_SUN_ENTITY,
     DEFAULT_UPDATE_INTERVAL,
+    DEFAULT_USE_ELEVATION,
+    DEFAULT_USE_TEMPERATURE,
     DOMAIN,
     MODE_SUN,
     SUBENTRY_TYPE_ACTIVITY,
@@ -58,6 +72,9 @@ _LOGGER = logging.getLogger(__name__)
 
 _STALE_FALLBACK_AFTER = timedelta(hours=2)
 
+_STEP = timedelta(minutes=10)
+_BUFFER = timedelta(minutes=20)
+
 
 @dataclass(frozen=True)
 class MowerState:
@@ -67,12 +84,37 @@ class MowerState:
 
 
 @dataclass(frozen=True)
+class _Candidate:
+    """One sub-hourly moment plus the samples covering its buffer."""
+
+    when: datetime
+    temperature: float
+    buffer_temperatures: tuple[float | None, ...]
+    buffer_times: tuple[datetime, ...]
+
+
+@dataclass(frozen=True)
+class ActivitySpec:
+    """Per-activity search settings driving the staged best-time passes."""
+
+    start_hour: int
+    end_hour: int
+    use_temperature: bool
+    min_temperature: float
+    max_temperature: float
+    use_elevation: bool
+    max_elevation: float
+
+
+@dataclass(frozen=True)
 class ActivityResult:
-    """The hour within an activity's window that is closest to the ideal temperature."""
+    """The moment within an activity's window that best satisfies the enabled passes."""
 
     best_at: datetime | None
     best_temperature: float | None
     delta_from_ideal: float | None
+    best_elevation: float | None = None
+    rolled_back: tuple[str, ...] = ()
 
 
 @dataclass
@@ -128,6 +170,9 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
 
         self._extremes: _CycleExtremes | None = None
         self._last_success: datetime | None = None
+        # Live threshold overrides keyed by subentry id, owned by the number
+        # platform so seasonal retuning does not require a config-flow edit.
+        self._activity_overrides: dict[str, dict[str, float]] = {}
 
         super().__init__(
             hass,
@@ -255,20 +300,59 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         forecast_points: list[ForecastPoint],
         now: datetime,
     ) -> dict[str, ActivityResult]:
-        """Find each activity's closest-to-ideal hour within its daily clock window."""
+        """Run each activity's staged best-time search over the forecast."""
         results: dict[str, ActivityResult] = {}
+        elevation_fn = self._elevation_fn()
         for subentry_id, subentry in self.entry.subentries.items():
             if subentry.subentry_type != SUBENTRY_TYPE_ACTIVITY:
                 continue
             data = subentry.data
+            spec = ActivitySpec(
+                start_hour=data[CONF_START_HOUR],
+                end_hour=data[CONF_END_HOUR],
+                use_temperature=data.get(CONF_USE_TEMPERATURE, DEFAULT_USE_TEMPERATURE),
+                min_temperature=self.activity_setting(
+                    subentry_id, CONF_MIN_TEMPERATURE, DEFAULT_MIN_TEMPERATURE
+                ),
+                max_temperature=self.activity_setting(
+                    subentry_id, CONF_MAX_TEMPERATURE, DEFAULT_MAX_TEMPERATURE
+                ),
+                use_elevation=data.get(CONF_USE_ELEVATION, DEFAULT_USE_ELEVATION),
+                max_elevation=self.activity_setting(
+                    subentry_id, CONF_MAX_ELEVATION, DEFAULT_MAX_ELEVATION
+                ),
+            )
             results[subentry_id] = _best_time(
                 forecast_points,
                 self.ideal_temperature,
-                data[CONF_START_HOUR],
-                data[CONF_END_HOUR],
+                spec,
                 now,
+                elevation_fn,
             )
         return results
+
+    def activity_setting(self, subentry_id: str, key: str, default: float) -> float:
+        """Live override if one has been set, else the configured value."""
+        override = self._activity_overrides.get(subentry_id, {}).get(key)
+        if override is not None:
+            return override
+        subentry = self.entry.subentries.get(subentry_id)
+        if subentry is None:
+            return default
+        return subentry.data.get(key, default)
+
+    def set_activity_setting(self, subentry_id: str, key: str, value: float) -> None:
+        self._activity_overrides.setdefault(subentry_id, {})[key] = value
+
+    def _elevation_fn(self) -> Callable[[datetime], float] | None:
+        """Solar elevation at an arbitrary instant for this installation's location."""
+        try:
+            location, _ = get_astral_location(self.hass)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("sun elevation unavailable, skipping elevation pass: %s", err)
+            return None
+        observer = location.observer
+        return lambda when: elevation(observer, when)
 
     def _fallback(
         self,
@@ -559,35 +643,152 @@ def _classify(
 def _best_time(
     points: list[ForecastPoint],
     ideal: float,
-    start_hour: int,
-    end_hour: int,
+    spec: ActivitySpec,
     now: datetime,
+    elevation_fn: Callable[[datetime], float] | None = None,
 ) -> ActivityResult:
-    """Pick the upcoming hour closest to `ideal` within a daily [start, end) clock window.
+    """Pick the best moment for an activity via staged passes, each able to roll back.
 
-    Only points at-or-after `now` are considered (you cannot go outside in the
-    past). If today's window has already passed, the search rolls forward to the
-    next day that has a qualifying forecast hour. Ties on temperature distance
-    resolve to the earliest hour.
+    1. Time  — always applied. Bounds the search to the daily [start, end) clock
+       window, at-or-after `now`, on the earliest day that still has forecast.
+    2. Temperature — keeps moments staying inside [min, max] for the whole buffer.
+    3. Elevation — keeps moments whose sun elevation stays at-or-below the cap for
+       the whole buffer.
+
+    A pass that eliminates every remaining moment is rolled back rather than
+    yielding nothing: a walk with the wrong light beats no walk at all. The
+    winner is then the surviving moment closest to `ideal`, ties to the earliest.
+
+    The buffer exists so a walk started at the chosen moment does not run into a
+    hotter or higher sun partway through — the caps must hold for its duration,
+    not just at the start.
     """
-    candidates: list[ForecastPoint] = []
-    for p in points:
-        if p.temperature is None or p.when < now:
-            continue
-        if start_hour <= dt_util.as_local(p.when).hour < end_hour:
-            candidates.append(p)
-
+    series = sorted(
+        ((p.when, float(p.temperature)) for p in points if p.temperature is not None),
+        key=lambda item: item[0],
+    )
+    candidates = _time_pass(series, spec, now)
     if not candidates:
         return ActivityResult(best_at=None, best_temperature=None, delta_from_ideal=None)
 
-    earliest_date = min(dt_util.as_local(p.when).date() for p in candidates)
-    same_day = [p for p in candidates if dt_util.as_local(p.when).date() == earliest_date]
-    best = min(same_day, key=lambda p: (abs(p.temperature - ideal), p.when))
+    rolled_back: list[str] = []
+    survivors = candidates
+
+    if spec.use_temperature:
+        kept = [c for c in survivors if _passes_temperature(c, spec)]
+        if kept:
+            survivors = kept
+        else:
+            rolled_back.append("temperature")
+
+    elevations: dict[datetime, tuple[float, ...]] = {}
+    if spec.use_elevation and elevation_fn is not None:
+        for c in survivors:
+            elevations[c.when] = tuple(elevation_fn(t) for t in c.buffer_times)
+        kept = [c for c in survivors if max(elevations[c.when]) <= spec.max_elevation]
+        if kept:
+            survivors = kept
+        else:
+            rolled_back.append("elevation")
+
+    best = min(survivors, key=lambda c: (abs(c.temperature - ideal), c.when))
+    best_elevation = elevations[best.when][0] if best.when in elevations else None
     return ActivityResult(
         best_at=best.when,
         best_temperature=best.temperature,
         delta_from_ideal=abs(best.temperature - ideal),
+        best_elevation=best_elevation,
+        rolled_back=tuple(rolled_back),
     )
+
+
+def _time_pass(
+    series: list[tuple[datetime, float]],
+    spec: ActivitySpec,
+    now: datetime,
+) -> list[_Candidate]:
+    """Build the sub-hourly candidate grid inside the activity's clock window.
+
+    The grid advances in local wall-clock time, so a 7am walk stays a 7am walk
+    across a DST change rather than sliding to 6am or 8am. Only the first day
+    that yields candidates is returned — today's window losing to a nicer one
+    three days out is not a useful answer.
+
+    The forecast is hourly but a walk does not start on the hour, so temperature
+    is interpolated onto a `_STEP` grid.
+    """
+    if not series:
+        return []
+
+    horizon = series[-1][0]
+    earliest = max(now, series[0][0])
+    if earliest > horizon:
+        return []
+
+    tz = dt_util.DEFAULT_TIME_ZONE
+    step_minutes = int(_STEP.total_seconds() // 60)
+    buffer_steps = int(_BUFFER / _STEP) + 1
+    day = dt_util.as_local(earliest).date()
+    last_day = dt_util.as_local(horizon).date()
+
+    while day <= last_day:
+        candidates: list[_Candidate] = []
+        midnight = datetime.combine(day, time())
+        for minute in range(spec.start_hour * 60, spec.end_hour * 60, step_minutes):
+            when = (midnight + timedelta(minutes=minute)).replace(tzinfo=tz)
+            if when < earliest or when > horizon:
+                continue
+            temperature = _interpolate(series, when)
+            if temperature is None:
+                continue
+            buffer_times = tuple(when + _STEP * i for i in range(buffer_steps))
+            candidates.append(
+                _Candidate(
+                    when=when,
+                    temperature=temperature,
+                    buffer_temperatures=tuple(_interpolate(series, t) for t in buffer_times),
+                    buffer_times=buffer_times,
+                )
+            )
+        if candidates:
+            return candidates
+        day += timedelta(days=1)
+    return []
+
+
+def _passes_temperature(candidate: _Candidate, spec: ActivitySpec) -> bool:
+    """A buffer sample past the forecast horizon fails: the cap cannot be guaranteed."""
+    for value in candidate.buffer_temperatures:
+        if value is None or not (spec.min_temperature <= value <= spec.max_temperature):
+            return False
+    return True
+
+
+def _interpolate(series: list[tuple[datetime, float]], when: datetime) -> float | None:
+    """Linear temperature between the bracketing hourly points; None outside the horizon."""
+    if not series or when < series[0][0] or when > series[-1][0]:
+        return None
+    index = bisect_left(series, when, key=lambda item: item[0])
+    if series[index][0] == when:
+        return series[index][1]
+    before_at, before = series[index - 1]
+    after_at, after = series[index]
+    span = (after_at - before_at).total_seconds()
+    if span <= 0:
+        return before
+    return before + (after - before) * ((when - before_at).total_seconds() / span)
+
+
+def _ceil_step(when: datetime) -> datetime:
+    """Round up to the next `_STEP` wall-clock mark so results land on :00/:10/:20..."""
+    truncated = when.replace(second=0, microsecond=0)
+    if truncated < when:
+        truncated += timedelta(minutes=1)
+    step_minutes = int(_STEP.total_seconds() // 60)
+    remainder = truncated.minute % step_minutes
+    if remainder:
+        truncated += timedelta(minutes=step_minutes - remainder)
+    return truncated
 
 
 def _max(a: float | None, b: float | None) -> float | None:

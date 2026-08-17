@@ -25,6 +25,9 @@ from .const import (
     CONF_END_HOUR,
     CONF_HOT_THRESHOLD,
     CONF_IDEAL_TEMPERATURE,
+    CONF_MAX_ELEVATION,
+    CONF_MAX_TEMPERATURE,
+    CONF_MIN_TEMPERATURE,
     CONF_MORNINGTIME_HOUR,
     CONF_MOWER_PRECIP_ENTITY,
     CONF_MOWER_TEMPERATURE_ENTITY,
@@ -34,6 +37,8 @@ from .const import (
     CONF_START_HOUR,
     CONF_SUN_ENTITY,
     CONF_UPDATE_INTERVAL,
+    CONF_USE_ELEVATION,
+    CONF_USE_TEMPERATURE,
     CONF_WEATHER_ENTITY,
     DAYTIME_MODES,
     DEFAULT_COLD_THRESHOLD,
@@ -41,12 +46,19 @@ from .const import (
     DEFAULT_DAYTIME_MODE,
     DEFAULT_DUAL_UNIT,
     DEFAULT_ENABLE_CONDITIONS,
+    DEFAULT_END_HOUR,
     DEFAULT_HOT_THRESHOLD,
     DEFAULT_IDEAL_TEMPERATURE,
+    DEFAULT_MAX_ELEVATION,
+    DEFAULT_MAX_TEMPERATURE,
+    DEFAULT_MIN_TEMPERATURE,
     DEFAULT_MORNINGTIME_HOUR,
     DEFAULT_NIGHTTIME_HOUR,
+    DEFAULT_START_HOUR,
     DEFAULT_SUN_ENTITY,
     DEFAULT_UPDATE_INTERVAL,
+    DEFAULT_USE_ELEVATION,
+    DEFAULT_USE_TEMPERATURE,
     DOMAIN,
     MODE_FIXED,
     SUBENTRY_TYPE_ACTIVITY,
@@ -219,12 +231,32 @@ def _activity_schema(defaults: dict[str, Any]) -> vol.Schema:
             ): str,
             vol.Required(
                 CONF_START_HOUR,
-                default=defaults.get(CONF_START_HOUR, 6),
+                default=defaults.get(CONF_START_HOUR, DEFAULT_START_HOUR),
             ): vol.All(int, vol.Range(min=0, max=23)),
             vol.Required(
                 CONF_END_HOUR,
-                default=defaults.get(CONF_END_HOUR, 9),
+                default=defaults.get(CONF_END_HOUR, DEFAULT_END_HOUR),
             ): vol.All(int, vol.Range(min=1, max=24)),
+            vol.Required(
+                CONF_USE_TEMPERATURE,
+                default=defaults.get(CONF_USE_TEMPERATURE, DEFAULT_USE_TEMPERATURE),
+            ): bool,
+            vol.Required(
+                CONF_MIN_TEMPERATURE,
+                default=defaults.get(CONF_MIN_TEMPERATURE, DEFAULT_MIN_TEMPERATURE),
+            ): vol.Coerce(float),
+            vol.Required(
+                CONF_MAX_TEMPERATURE,
+                default=defaults.get(CONF_MAX_TEMPERATURE, DEFAULT_MAX_TEMPERATURE),
+            ): vol.Coerce(float),
+            vol.Required(
+                CONF_USE_ELEVATION,
+                default=defaults.get(CONF_USE_ELEVATION, DEFAULT_USE_ELEVATION),
+            ): bool,
+            vol.Required(
+                CONF_MAX_ELEVATION,
+                default=defaults.get(CONF_MAX_ELEVATION, DEFAULT_MAX_ELEVATION),
+            ): vol.All(vol.Coerce(float), vol.Range(min=-90, max=90)),
         }
     )
 
@@ -234,6 +266,8 @@ def _validate_activity(user_input: dict[str, Any]) -> str | None:
         return "invalid_name"
     if user_input[CONF_START_HOUR] >= user_input[CONF_END_HOUR]:
         return "invalid_activity_window"
+    if user_input[CONF_MIN_TEMPERATURE] > user_input[CONF_MAX_TEMPERATURE]:
+        return "invalid_temperature_range"
     return None
 
 
@@ -262,6 +296,11 @@ class ActivitySubentryFlow(ConfigSubentryFlow):
                     CONF_ACTIVITY_NAME: user_input[CONF_ACTIVITY_NAME].strip(),
                     CONF_START_HOUR: user_input[CONF_START_HOUR],
                     CONF_END_HOUR: user_input[CONF_END_HOUR],
+                    CONF_USE_TEMPERATURE: user_input[CONF_USE_TEMPERATURE],
+                    CONF_MIN_TEMPERATURE: user_input[CONF_MIN_TEMPERATURE],
+                    CONF_MAX_TEMPERATURE: user_input[CONF_MAX_TEMPERATURE],
+                    CONF_USE_ELEVATION: user_input[CONF_USE_ELEVATION],
+                    CONF_MAX_ELEVATION: user_input[CONF_MAX_ELEVATION],
                 }
                 title = data[CONF_ACTIVITY_NAME]
                 if reconfiguring:
