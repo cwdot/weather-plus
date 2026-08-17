@@ -14,6 +14,8 @@ passes through:
 
 ## Install via HACS
 
+Requires **Home Assistant 2026.8.0 or newer**
+
 1. HACS → Integrations → ⋮ → Custom repositories
 2. Add `https://github.com/cwdot/weather-plus` as type **Integration**
 3. Install **Weather Plus**, restart Home Assistant
@@ -63,6 +65,19 @@ partway through.
 
 `sensor.<activity>_best_time` carries `sun_elevation` and `rolled_back` attributes, so a
 compromised answer is distinguishable from one that satisfied every constraint.
+
+### Holding today's pick
+
+The search only looks forward, so a chosen moment would otherwise decay into "best *remaining*
+time" as its window elapsed — `07:20 @ 70°F` becoming `08:50 @ 79°F` by mid-morning, with a
+restart making the jump visible all at once. Once a moment has been chosen for the current local
+day it is held for the rest of that day; while it is still upcoming it keeps tracking forecast
+updates, and it is released when the day rolls over.
+
+`sensor.<activity>_best_time` restores its pick across restarts using Home Assistant's
+restore-state (not the recorder, which can be disabled or purged), so a redeploy after the walk
+has happened still reports the moment that was actually best. The `is_past` attribute
+distinguishes a held moment from an upcoming one.
 
 ### Retuning thresholds at runtime
 
