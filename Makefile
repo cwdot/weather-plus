@@ -10,6 +10,8 @@ INTEGRATION := custom_components/weather_plus
 
 .PHONY: help install test lint format build run clean
 
+.DEFAULT_GOAL := build
+
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
 
