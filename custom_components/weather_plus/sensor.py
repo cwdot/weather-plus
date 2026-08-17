@@ -18,7 +18,9 @@ from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_conversion import TemperatureConverter
 
 from .const import (
@@ -251,7 +253,7 @@ class _ActivitySensorBase(CoordinatorEntity[WeatherPlusCoordinator], SensorEntit
         return self.coordinator.data.activities.get(self._subentry_id)
 
 
-class _ActivityBestTimeSensor(_ActivitySensorBase):
+class _ActivityBestTimeSensor(_ActivitySensorBase, RestoreEntity):
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_name = "Best Time"
     _attr_icon = "mdi:clock-check-outline"
@@ -265,6 +267,36 @@ class _ActivityBestTimeSensor(_ActivitySensorBase):
     ) -> None:
         super().__init__(coordinator, entry, subentry_id, activity_name, "best_time")
 
+    async def async_added_to_hass(self) -> None:
+        """Recover a pick made before a restart.
+
+        The coordinator refreshes during entry setup, before this entity exists,
+        so a redeploy after the chosen moment has passed would otherwise recompute
+        against the remaining window and report a later, worse time.
+        """
+        await super().async_added_to_hass()
+        restored = await self.async_get_last_state()
+        if restored is None:
+            return
+        best_at = dt_util.parse_datetime(restored.state)
+        if best_at is None:
+            return
+        now = dt_util.now()
+        if best_at > now or dt_util.as_local(best_at).date() != dt_util.as_local(now).date():
+            return
+        attrs = restored.attributes
+        self.coordinator.seed_activity_pick(
+            self._subentry_id,
+            ActivityResult(
+                best_at=best_at,
+                best_temperature=attrs.get("best_temperature"),
+                delta_from_ideal=attrs.get("delta_from_ideal"),
+                best_elevation=attrs.get("sun_elevation"),
+                rolled_back=tuple(attrs.get("rolled_back") or ()),
+            ),
+        )
+        await self.coordinator.async_refresh()
+
     @property
     def native_value(self) -> datetime | None:
         result = self._result
@@ -272,15 +304,23 @@ class _ActivityBestTimeSensor(_ActivitySensorBase):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Surface the sun elevation and which passes had to be rolled back.
+        """Surface enough to rebuild this pick after a restart, plus how it was reached.
 
         Without `rolled_back` a compromised answer is indistinguishable from one
-        that satisfied every constraint.
+        that satisfied every constraint; `is_past` tells an automation the moment
+        is being held rather than still upcoming.
         """
         result = self._result
         if result is None or result.best_at is None:
             return None
-        attrs: dict[str, Any] = {"rolled_back": list(result.rolled_back)}
+        attrs: dict[str, Any] = {
+            "rolled_back": list(result.rolled_back),
+            "is_past": result.best_at <= dt_util.now(),
+        }
+        if result.best_temperature is not None:
+            attrs["best_temperature"] = result.best_temperature
+        if result.delta_from_ideal is not None:
+            attrs["delta_from_ideal"] = round(result.delta_from_ideal, 2)
         if result.best_elevation is not None:
             attrs["sun_elevation"] = round(result.best_elevation, 2)
         return attrs

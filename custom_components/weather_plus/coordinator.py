@@ -173,6 +173,8 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         # Live threshold overrides keyed by subentry id, owned by the number
         # platform so seasonal retuning does not require a config-flow edit.
         self._activity_overrides: dict[str, dict[str, float]] = {}
+        # Today's chosen moment per activity, held once it has passed.
+        self._activity_picks: dict[str, ActivityResult] = {}
 
         super().__init__(
             hass,
@@ -322,14 +324,45 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
                     subentry_id, CONF_MAX_ELEVATION, DEFAULT_MAX_ELEVATION
                 ),
             )
-            results[subentry_id] = _best_time(
+            fresh = _best_time(
                 forecast_points,
                 self.ideal_temperature,
                 spec,
                 now,
                 elevation_fn,
             )
+            results[subentry_id] = self._hold_past_pick(subentry_id, fresh, now)
         return results
+
+    def _hold_past_pick(
+        self,
+        subentry_id: str,
+        fresh: ActivityResult,
+        now: datetime,
+    ) -> ActivityResult:
+        """Keep today's chosen moment once it has passed.
+
+        The search only looks forward, so a pick silently degrades into "best
+        remaining time" as its window elapses — 07:20 at 70F becomes 08:50 at 79F
+        by mid-morning, and a restart makes that jump visible all at once. Once a
+        moment has been chosen for today it is held for the rest of the local day;
+        while it is still upcoming it keeps tracking forecast updates.
+        """
+        stored = self._activity_picks.get(subentry_id)
+        if (
+            stored is not None
+            and stored.best_at is not None
+            and stored.best_at <= now
+            and dt_util.as_local(stored.best_at).date() == dt_util.as_local(now).date()
+        ):
+            return stored
+        if fresh.best_at is not None:
+            self._activity_picks[subentry_id] = fresh
+        return fresh
+
+    def seed_activity_pick(self, subentry_id: str, result: ActivityResult) -> None:
+        """Restore a pick made before a restart so a redeploy does not lose it."""
+        self._activity_picks[subentry_id] = result
 
     def activity_setting(self, subentry_id: str, key: str, default: float) -> float:
         """Live override if one has been set, else the configured value."""

@@ -7,14 +7,17 @@ exercised together — not in isolation.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from homeassistant.const import ATTR_ENTITY_ID
-from homeassistant.core import HomeAssistant, ServiceResponse, SupportsResponse
+from homeassistant.core import HomeAssistant, ServiceResponse, State, SupportsResponse
 from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_system import US_CUSTOMARY_SYSTEM
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    mock_restore_cache,
+)
 
 from custom_components.weather_plus.const import (
     CONF_ENABLE_CONDITIONS,
@@ -249,3 +252,112 @@ async def test_legacy_subentry_without_new_keys_still_works(hass: HomeAssistant)
     assert float(hass.states.get(_MIN).state) == 60
     assert float(hass.states.get(_MAX).state) == 75
     assert float(hass.states.get(_ELEVATION).state) == 15
+
+
+async def _setup_morning_walk(hass: HomeAssistant) -> MockConfigEntry:
+    """Standard morning-walk entry, set up at whatever the frozen clock says."""
+    hass.config.units = US_CUSTOMARY_SYSTEM
+    hass.states.async_set(
+        _WEATHER,
+        "sunny",
+        {"temperature": 60, "temperature_unit": "°F", "friendly_name": "Home"},
+    )
+
+    def _forecasts(call) -> ServiceResponse:
+        return {
+            _WEATHER: {
+                "forecast": [
+                    {
+                        "datetime": _NOW.replace(hour=hour).isoformat(),
+                        "temperature": temp,
+                        "condition": "sunny",
+                    }
+                    for hour, temp in _HOURLY
+                ]
+            }
+        }
+
+    hass.services.async_register(
+        "weather", "get_forecasts", _forecasts, supports_response=SupportsResponse.ONLY
+    )
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=_WEATHER,
+        data={CONF_WEATHER_ENTITY: _WEATHER},
+        options={CONF_IDEAL_TEMPERATURE: 70, CONF_ENABLE_CONDITIONS: False},
+        subentries_data=[
+            {
+                "subentry_type": SUBENTRY_TYPE_ACTIVITY,
+                "title": "Morning walk",
+                "unique_id": None,
+                "data": {
+                    "name": "Morning walk",
+                    "start_hour": 6,
+                    "end_hour": 9,
+                    "use_temperature": True,
+                    "min_temperature": 50,
+                    "max_temperature": 90,
+                    "use_elevation": False,
+                    "max_elevation": 15,
+                },
+            }
+        ],
+    )
+    config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    return config_entry
+
+
+async def test_redeploy_after_the_pick_passed_without_history(hass: HomeAssistant, freezer) -> None:
+    """The symptom being fixed: with nothing to restore, a late setup looks ahead."""
+    freezer.move_to(_NOW.replace(hour=8))
+    await _setup_morning_walk(hass)
+
+    best_at = dt_util.parse_datetime(hass.states.get(_BEST_TIME).state)
+    assert best_at >= _NOW.replace(hour=8)
+    # The genuinely best moment was 07:20 at 70 F; it is unreachable from here.
+    assert best_at != _NOW.replace(hour=7, minute=20)
+    assert float(hass.states.get(_BEST_TEMP).state) > 70
+
+
+async def test_redeploy_restores_the_pick_made_before_the_restart(
+    hass: HomeAssistant, freezer
+) -> None:
+    """The fix: this morning's 07:20 pick survives a redeploy at 08:00."""
+    freezer.move_to(_NOW.replace(hour=8))
+    mock_restore_cache(
+        hass,
+        [
+            State(
+                _BEST_TIME,
+                _NOW.replace(hour=7, minute=20).isoformat(),
+                {"best_temperature": 70.0, "delta_from_ideal": 0.0, "rolled_back": []},
+            )
+        ],
+    )
+    await _setup_morning_walk(hass)
+
+    state = hass.states.get(_BEST_TIME)
+    assert dt_util.parse_datetime(state.state) == _NOW.replace(hour=7, minute=20)
+    assert state.attributes["best_temperature"] == 70.0
+    assert state.attributes["is_past"] is True
+
+
+async def test_redeploy_ignores_a_pick_from_a_previous_day(hass: HomeAssistant, freezer) -> None:
+    """A stale restored value must not pin the sensor to yesterday."""
+    freezer.move_to(_NOW.replace(hour=8))
+    mock_restore_cache(
+        hass,
+        [
+            State(
+                _BEST_TIME,
+                (_NOW - timedelta(days=1)).replace(hour=7, minute=20).isoformat(),
+                {"best_temperature": 70.0},
+            )
+        ],
+    )
+    await _setup_morning_walk(hass)
+
+    best_at = dt_util.parse_datetime(hass.states.get(_BEST_TIME).state)
+    assert dt_util.as_local(best_at).date() == _NOW.date()

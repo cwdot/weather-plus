@@ -9,7 +9,11 @@ import pytest
 from homeassistant.util import dt as dt_util
 
 from custom_components.weather_plus.conditions import ForecastPoint
-from custom_components.weather_plus.coordinator import ActivitySpec, _best_time
+from custom_components.weather_plus.coordinator import (
+    ActivitySpec,
+    WeatherPlusCoordinator,
+    _best_time,
+)
 
 # Noon, so today's morning window (6-9) has already passed.
 _NOW = datetime(2026, 4, 18, 12, 0, tzinfo=UTC)
@@ -22,6 +26,15 @@ def _utc_default_tz():
     dt_util.set_default_time_zone(UTC)
     yield
     dt_util.set_default_time_zone(original)
+
+
+class _StubCoordinator:
+    """Exercises _hold_past_pick without standing up Home Assistant."""
+
+    _hold_past_pick = WeatherPlusCoordinator._hold_past_pick
+
+    def __init__(self) -> None:
+        self._activity_picks = {}
 
 
 def _at(hour: int, minute: int = 0, day_offset: int = 0) -> datetime:
@@ -328,3 +341,65 @@ def test_grid_follows_local_wall_clock_across_dst():
         assert result.best_at.astimezone(UTC) - previous.astimezone(UTC) == timedelta(hours=25)
     finally:
         dt_util.set_default_time_zone(original)
+
+
+# --- holding today's pick ---------------------------------------------------
+
+
+def _morning_points(day: datetime) -> list[ForecastPoint]:
+    return [
+        _pt(day.replace(hour=h, minute=0), t)
+        for h, t in [(5, 58), (6, 62), (7, 68), (8, 74), (9, 80), (10, 86)]
+    ]
+
+
+def test_pick_is_held_once_it_has_passed():
+    """Without holding, 07:20 at 70 F degrades to 08:50 at 79 F by mid-morning."""
+    coordinator = _StubCoordinator()
+    points = _morning_points(_NOW)
+    spec = _spec(6, 9, use_temperature=True, min_temperature=50, max_temperature=90)
+
+    picks = []
+    for hour, minute in [(5, 30), (6, 0), (7, 0), (8, 0), (8, 45)]:
+        now = _NOW.replace(hour=hour, minute=minute)
+        fresh = _best_time(points, 70, spec, now)
+        picks.append(coordinator._hold_past_pick("activity", fresh, now))
+
+    assert all(p.best_at == _at(7, 20) for p in picks)
+    assert all(p.best_temperature == pytest.approx(70) for p in picks)
+
+
+def test_upcoming_pick_still_tracks_forecast_updates():
+    """A pick that has not happened yet must not be frozen — the forecast improves."""
+    coordinator = _StubCoordinator()
+    spec = _spec(6, 9, use_temperature=True, min_temperature=50, max_temperature=90)
+    now = _NOW.replace(hour=6, minute=0)
+
+    first = _best_time(_morning_points(_NOW), 70, spec, now)
+    held = coordinator._hold_past_pick("activity", first, now)
+    assert held.best_at == _at(7, 20)
+
+    # Revised forecast: the whole morning is cooler, so 70 arrives later.
+    revised = [
+        _pt(_NOW.replace(hour=h, minute=0), t)
+        for h, t in [(5, 52), (6, 56), (7, 62), (8, 68), (9, 74), (10, 80)]
+    ]
+    second = _best_time(revised, 70, spec, now)
+    held = coordinator._hold_past_pick("activity", second, now)
+    assert held.best_at == _at(8, 20)
+
+
+def test_held_pick_is_released_the_next_day():
+    """Yesterday's moment must not pin the sensor forever."""
+    coordinator = _StubCoordinator()
+    spec = _spec(6, 9, use_temperature=True, min_temperature=50, max_temperature=90)
+
+    now = _NOW.replace(hour=8)
+    coordinator._hold_past_pick("activity", _best_time(_morning_points(_NOW), 70, spec, now), now)
+
+    tomorrow = _NOW + timedelta(days=1)
+    later = tomorrow.replace(hour=5, minute=0)
+    fresh = _best_time(_morning_points(tomorrow), 70, spec, later)
+    held = coordinator._hold_past_pick("activity", fresh, later)
+
+    assert dt_util.as_local(held.best_at).date() == tomorrow.date()
