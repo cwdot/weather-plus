@@ -268,10 +268,11 @@ async def _setup_morning_walk(hass: HomeAssistant) -> MockConfigEntry:
             _WEATHER: {
                 "forecast": [
                     {
-                        "datetime": _NOW.replace(hour=hour).isoformat(),
+                        "datetime": (_NOW + timedelta(days=day)).replace(hour=hour).isoformat(),
                         "temperature": temp,
                         "condition": "sunny",
                     }
+                    for day in (0, 1)
                     for hour, temp in _HOURLY
                 ]
             }
@@ -321,43 +322,57 @@ async def test_redeploy_after_the_pick_passed_without_history(hass: HomeAssistan
     assert float(hass.states.get(_BEST_TEMP).state) > 70
 
 
-async def test_redeploy_restores_the_pick_made_before_the_restart(
+async def test_redeploy_rolls_to_tomorrow_when_this_morning_is_spent(
     hass: HomeAssistant, freezer
 ) -> None:
-    """The fix: this morning's 07:20 pick survives a redeploy at 08:00."""
+    """The restored 07:20 has passed, so the answer is tomorrow's window."""
     freezer.move_to(_NOW.replace(hour=8))
     mock_restore_cache(
         hass,
-        [
-            State(
-                _BEST_TIME,
-                _NOW.replace(hour=7, minute=20).isoformat(),
-                {"best_temperature": 70.0, "delta_from_ideal": 0.0, "rolled_back": []},
-            )
-        ],
+        [State(_BEST_TIME, _NOW.replace(hour=7, minute=20).isoformat(), {"rolled_back": []})],
     )
     await _setup_morning_walk(hass)
 
-    state = hass.states.get(_BEST_TIME)
-    assert dt_util.parse_datetime(state.state) == _NOW.replace(hour=7, minute=20)
-    assert state.attributes["best_temperature"] == 70.0
-    assert state.attributes["is_past"] is True
+    best_at = dt_util.parse_datetime(hass.states.get(_BEST_TIME).state)
+    assert best_at == (_NOW + timedelta(days=1)).replace(hour=7, minute=20)
+    assert float(hass.states.get(_BEST_TEMP).state) == pytest.approx(70)
 
 
-async def test_redeploy_ignores_a_pick_from_a_previous_day(hass: HomeAssistant, freezer) -> None:
-    """A stale restored value must not pin the sensor to yesterday."""
-    freezer.move_to(_NOW.replace(hour=8))
+async def test_redeploy_keeps_a_pick_that_already_points_at_tomorrow(
+    hass: HomeAssistant, freezer
+) -> None:
+    """Restarting after the roll must not drop back to what is left of today."""
+    freezer.move_to(_NOW.replace(hour=14))
     mock_restore_cache(
         hass,
         [
             State(
                 _BEST_TIME,
-                (_NOW - timedelta(days=1)).replace(hour=7, minute=20).isoformat(),
-                {"best_temperature": 70.0},
+                (_NOW + timedelta(days=1)).replace(hour=7, minute=20).isoformat(),
+                {"rolled_back": []},
             )
         ],
     )
     await _setup_morning_walk(hass)
 
     best_at = dt_util.parse_datetime(hass.states.get(_BEST_TIME).state)
-    assert dt_util.as_local(best_at).date() == _NOW.date()
+    assert best_at == (_NOW + timedelta(days=1)).replace(hour=7, minute=20)
+
+
+async def test_redeploy_ignores_a_pick_from_a_previous_day(hass: HomeAssistant, freezer) -> None:
+    """A stale restored value must not push the search past today's window."""
+    freezer.move_to(_NOW.replace(hour=5, minute=30))
+    mock_restore_cache(
+        hass,
+        [
+            State(
+                _BEST_TIME,
+                (_NOW - timedelta(days=1)).replace(hour=7, minute=20).isoformat(),
+                {"rolled_back": []},
+            )
+        ],
+    )
+    await _setup_morning_walk(hass)
+
+    best_at = dt_util.parse_datetime(hass.states.get(_BEST_TIME).state)
+    assert best_at == _NOW.replace(hour=7, minute=20)

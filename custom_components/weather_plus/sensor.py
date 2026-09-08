@@ -268,11 +268,12 @@ class _ActivityBestTimeSensor(_ActivitySensorBase, RestoreEntity):
         super().__init__(coordinator, entry, subentry_id, activity_name, "best_time")
 
     async def async_added_to_hass(self) -> None:
-        """Recover a pick made before a restart.
+        """Tell the coordinator whether today's window was already spent.
 
         The coordinator refreshes during entry setup, before this entity exists,
-        so a redeploy after the chosen moment has passed would otherwise recompute
-        against the remaining window and report a later, worse time.
+        so a redeploy would otherwise recompute against what is left of today's
+        window and report a later, worse time. A restored state that has passed —
+        or that already points at a later day — means today is done.
         """
         await super().async_added_to_hass()
         restored = await self.async_get_last_state()
@@ -282,19 +283,11 @@ class _ActivityBestTimeSensor(_ActivitySensorBase, RestoreEntity):
         if best_at is None:
             return
         now = dt_util.now()
-        if best_at > now or dt_util.as_local(best_at).date() != dt_util.as_local(now).date():
+        best_day = dt_util.as_local(best_at).date()
+        today = dt_util.as_local(now).date()
+        if best_day < today or (best_day == today and best_at > now):
             return
-        attrs = restored.attributes
-        self.coordinator.seed_activity_pick(
-            self._subentry_id,
-            ActivityResult(
-                best_at=best_at,
-                best_temperature=attrs.get("best_temperature"),
-                delta_from_ideal=attrs.get("delta_from_ideal"),
-                best_elevation=attrs.get("sun_elevation"),
-                rolled_back=tuple(attrs.get("rolled_back") or ()),
-            ),
-        )
+        self.coordinator.mark_window_consumed(self._subentry_id)
         await self.coordinator.async_refresh()
 
     @property
@@ -304,23 +297,15 @@ class _ActivityBestTimeSensor(_ActivitySensorBase, RestoreEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Surface enough to rebuild this pick after a restart, plus how it was reached.
+        """Surface the sun elevation and which passes had to be rolled back.
 
         Without `rolled_back` a compromised answer is indistinguishable from one
-        that satisfied every constraint; `is_past` tells an automation the moment
-        is being held rather than still upcoming.
+        that satisfied every constraint.
         """
         result = self._result
         if result is None or result.best_at is None:
             return None
-        attrs: dict[str, Any] = {
-            "rolled_back": list(result.rolled_back),
-            "is_past": result.best_at <= dt_util.now(),
-        }
-        if result.best_temperature is not None:
-            attrs["best_temperature"] = result.best_temperature
-        if result.delta_from_ideal is not None:
-            attrs["delta_from_ideal"] = round(result.delta_from_ideal, 2)
+        attrs: dict[str, Any] = {"rolled_back": list(result.rolled_back)}
         if result.best_elevation is not None:
             attrs["sun_elevation"] = round(result.best_elevation, 2)
         return attrs

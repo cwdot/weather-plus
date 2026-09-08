@@ -6,7 +6,7 @@ import logging
 from bisect import bisect_left
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from astral.sun import elevation
@@ -173,8 +173,10 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
         # Live threshold overrides keyed by subentry id, owned by the number
         # platform so seasonal retuning does not require a config-flow edit.
         self._activity_overrides: dict[str, dict[str, float]] = {}
-        # Today's chosen moment per activity, held once it has passed.
+        # Last published moment per activity, and the local day whose window has
+        # already been spent — once today's moment passes, the search moves on.
         self._activity_picks: dict[str, ActivityResult] = {}
+        self._consumed_days: dict[str, date] = {}
 
         super().__init__(
             hass,
@@ -324,45 +326,55 @@ class WeatherPlusCoordinator(DataUpdateCoordinator[ForecastStats]):
                     subentry_id, CONF_MAX_ELEVATION, DEFAULT_MAX_ELEVATION
                 ),
             )
-            fresh = _best_time(
-                forecast_points,
-                self.ideal_temperature,
-                spec,
-                now,
-                elevation_fn,
-            )
-            results[subentry_id] = self._hold_past_pick(subentry_id, fresh, now)
+            results[subentry_id] = self._pick(subentry_id, forecast_points, spec, now, elevation_fn)
         return results
 
-    def _hold_past_pick(
+    def _pick(
         self,
         subentry_id: str,
-        fresh: ActivityResult,
+        forecast_points: list[ForecastPoint],
+        spec: ActivitySpec,
         now: datetime,
+        elevation_fn: Callable[[datetime], float] | None,
     ) -> ActivityResult:
-        """Keep today's chosen moment once it has passed.
+        """Search tomorrow's window once today's chosen moment has passed.
 
-        The search only looks forward, so a pick silently degrades into "best
-        remaining time" as its window elapses — 07:20 at 70F becomes 08:50 at 79F
-        by mid-morning, and a restart makes that jump visible all at once. Once a
-        moment has been chosen for today it is held for the rest of the local day;
-        while it is still upcoming it keeps tracking forecast updates.
+        The search only looks forward, so recomputing against what is left of a
+        window degrades the answer as the morning wears on — 07:20 at 70F becomes
+        08:50 at 79F. Today is spent at that point; the useful answer is the next
+        day's window, and it stays the answer for the rest of today.
         """
+        today = dt_util.as_local(now).date()
         stored = self._activity_picks.get(subentry_id)
         if (
             stored is not None
             and stored.best_at is not None
             and stored.best_at <= now
-            and dt_util.as_local(stored.best_at).date() == dt_util.as_local(now).date()
+            and dt_util.as_local(stored.best_at).date() == today
         ):
-            return stored
-        if fresh.best_at is not None:
-            self._activity_picks[subentry_id] = fresh
-        return fresh
+            self._consumed_days[subentry_id] = today
 
-    def seed_activity_pick(self, subentry_id: str, result: ActivityResult) -> None:
-        """Restore a pick made before a restart so a redeploy does not lose it."""
-        self._activity_picks[subentry_id] = result
+        consumed = self._consumed_days.get(subentry_id) == today
+        search_from = (
+            dt_util.start_of_local_day(dt_util.as_local(now) + timedelta(days=1))
+            if consumed
+            else now
+        )
+
+        result = _best_time(
+            forecast_points, self.ideal_temperature, spec, search_from, elevation_fn
+        )
+        if result.best_at is not None:
+            self._activity_picks[subentry_id] = result
+        return result
+
+    def mark_window_consumed(self, subentry_id: str) -> None:
+        """Record that today's window is spent, for a pick made before a restart.
+
+        The coordinator refreshes during entry setup with no memory of the day,
+        so without this a redeploy would fall back to today's remaining window.
+        """
+        self._consumed_days[subentry_id] = dt_util.as_local(dt_util.now()).date()
 
     def activity_setting(self, subentry_id: str, key: str, default: float) -> float:
         """Live override if one has been set, else the configured value."""
