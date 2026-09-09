@@ -211,7 +211,6 @@ class _MowerPredictionSensor(CoordinatorEntity[WeatherPlusCoordinator], SensorEn
             name=f"{coordinator.source_object_id} Mower",
             manufacturer="Weather Plus",
             model="Mower readiness",
-            via_device=(DOMAIN, entry.entry_id),
         )
 
     @property
@@ -245,7 +244,6 @@ class _ActivitySensorBase(CoordinatorEntity[WeatherPlusCoordinator], SensorEntit
             name=activity_name,
             manufacturer="Weather Plus",
             model="Activity best time",
-            via_device=(DOMAIN, entry.entry_id),
         )
 
     @property

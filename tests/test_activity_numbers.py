@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant, ServiceResponse, State, SupportsResponse
+from homeassistant.helpers import device_registry as dr
 from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_system import US_CUSTOMARY_SYSTEM
 from pytest_homeassistant_custom_component.common import (
@@ -376,3 +377,21 @@ async def test_redeploy_ignores_a_pick_from_a_previous_day(hass: HomeAssistant, 
 
     best_at = dt_util.parse_datetime(hass.states.get(_BEST_TIME).state)
     assert best_at == _NOW.replace(hour=7, minute=20)
+
+
+async def test_activity_device_does_not_link_a_parent_device(
+    hass: HomeAssistant, entry: MockConfigEntry
+) -> None:
+    """`via_device` is rejected outright by current Home Assistant.
+
+    Passing it makes `async_get_or_create` raise inside `_async_add_entity`, and
+    every entity after the one that created the device is silently dropped — which
+    is how Best Temperature disappeared while Best Time stayed.
+    """
+    subentry_id = next(iter(entry.subentries))
+    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, subentry_id)})
+
+    assert device is not None
+    assert device.via_device_id is None
+    assert hass.states.get(_BEST_TIME) is not None
+    assert hass.states.get(_BEST_TEMP) is not None

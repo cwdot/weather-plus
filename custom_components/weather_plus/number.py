@@ -125,7 +125,6 @@ class _ActivityThreshold(CoordinatorEntity[WeatherPlusCoordinator], RestoreNumbe
             name=activity_name,
             manufacturer="Weather Plus",
             model="Activity best time",
-            via_device=(DOMAIN, entry.entry_id),
         )
 
     async def async_added_to_hass(self) -> None:
