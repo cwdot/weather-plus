@@ -389,7 +389,9 @@ async def test_activity_device_does_not_link_a_parent_device(
     is how Best Temperature disappeared while Best Time stayed.
     """
     subentry_id = next(iter(entry.subentries))
-    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, subentry_id)})
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, subentry_id), entry.entry_id
+    )
 
     assert device is not None
     assert device.via_device_id is None
